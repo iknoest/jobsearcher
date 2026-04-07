@@ -147,10 +147,10 @@ def enrich_and_filter(df, filter_config=None):
         filter_config = load_filter_config()
 
     if df.empty:
-        return df
+        return df, []
 
     results = []
-    skipped = {"dutch_jd": 0, "junior": 0, "no_description": 0}
+    filtered_log = []  # List of {title, company, reason} for filtered jobs
 
     for _, row in df.iterrows():
         desc = str(row.get("description", ""))
@@ -165,12 +165,20 @@ def enrich_and_filter(df, filter_config=None):
         # 1. Dutch-only JD (by description or by Dutch title keywords) — only check if we have text
         if filter_config.get("skip_dutch_jd", True):
             if (has_description and is_dutch_jd(desc)) or DUTCH_TITLE_PATTERNS.search(title):
-                skipped["dutch_jd"] += 1
+                filtered_log.append({
+                    "title": title[:60],
+                    "company": str(row.get("company", ""))[:30],
+                    "reason": "Dutch JD" if (has_description and is_dutch_jd(desc)) else "Dutch title",
+                })
                 continue
 
         # 2. Junior/entry-level (reject) — only if we have description to check
         if has_description and SENIORITY_REJECT_PATTERNS.search(desc) and not SENIORITY_FIT_PATTERNS.search(desc):
-            skipped["junior"] += 1
+            filtered_log.append({
+                "title": title[:60],
+                "company": str(row.get("company", ""))[:30],
+                "reason": "Junior/entry-level",
+            })
             continue
 
         # --- SOFT FLAGS (do NOT reject, just tag) ---
@@ -235,6 +243,9 @@ def enrich_and_filter(df, filter_config=None):
         results.append(row)
 
     filtered_df = pd.DataFrame(results)
-    skip_details = ", ".join(f"{k}: {v}" for k, v in skipped.items() if v > 0)
-    print(f"Filtered: {len(df)} -> {len(filtered_df)} jobs ({len(df) - len(filtered_df)} removed{': ' + skip_details if skip_details else ''})")
-    return filtered_df
+    reason_counts = {}
+    for entry in filtered_log:
+        reason_counts[entry["reason"]] = reason_counts.get(entry["reason"], 0) + 1
+    skip_details = ", ".join(f"{k}: {v}" for k, v in reason_counts.items())
+    print(f"Filtered: {len(df)} -> {len(filtered_df)} jobs ({len(filtered_log)} removed: {skip_details})")
+    return filtered_df, filtered_log
