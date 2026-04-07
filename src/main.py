@@ -9,6 +9,7 @@ Usage:
 import argparse
 import os
 import sys
+import time
 
 from dotenv import load_dotenv
 
@@ -35,11 +36,14 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
         label += f" [max {max_jobs} jobs]"
     print(label)
     print("=" * 60)
+    pipeline_start = time.time()
 
     # Step 1: Scrape
     print("\n[1/6] Scraping jobs...")
+    t0 = time.time()
     tiers = ["primary"] if quick else None
     jobs = scrape_all_keywords(tiers=tiers)
+    print(f"  -> {time.time() - t0:.0f}s")
     if jobs.empty:
         print("No jobs found. Exiting.")
         return
@@ -47,21 +51,25 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
 
     # Step 2: Filter + Enrich
     print("\n[2/6] Filtering & enriching...")
+    t0 = time.time()
     jobs, filter_log = enrich_and_filter(jobs)
     filtered_count = len(filter_log)
     if filter_log:
         print(f"\n  Pre-filtered jobs:")
         for entry in filter_log:
             print(f"    [{entry['reason']}] {entry['title']} @ {entry['company']}")
+    print(f"  -> {time.time() - t0:.0f}s")
     if jobs.empty:
         print("All jobs filtered out. Exiting.")
         return
 
     # Step 3: Travel time
     print("\n[3/6] Estimating travel times...")
+    t0 = time.time()
     origin = os.getenv("HOME_STATION", "Hoofddorp")
     arrival = os.getenv("ARRIVAL_TIME", "09:00")
     jobs = enrich_with_travel_time(jobs, origin, arrival)
+    print(f"  -> {time.time() - t0:.0f}s")
 
     if scrape_only:
         print(f"\n[Scrape-only] {len(jobs)} jobs after filtering:")
@@ -74,12 +82,14 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
         return
 
     # Step 4: LLM scoring
+    t0 = time.time()
     if max_jobs:
         jobs = jobs.head(max_jobs)
         print(f"\n[4/6] Scoring {len(jobs)} jobs with LLM (capped at {max_jobs})...")
     else:
         print("\n[4/6] Scoring with LLM (Phygital-weighted framework)...")
     jobs = score_all_jobs(jobs, min_score=min_score)
+    print(f"  -> {time.time() - t0:.0f}s")
     if jobs.empty:
         print("No jobs scored. Exiting.")
         return
@@ -93,6 +103,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
 
     # Step 5: Store in Google Sheets
     print("\n[5/6] Saving to Google Sheets...")
+    t0 = time.time()
     spreadsheet_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
     if spreadsheet_id:
         append_jobs(jobs, spreadsheet_id)
@@ -101,14 +112,19 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
         os.makedirs("output", exist_ok=True)
         jobs.to_csv(f"output/matches_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M')}.csv", index=False)
 
+    print(f"  -> {time.time() - t0:.0f}s")
+
     # Step 6: Send email digest
     print("\n[6/6] Building digest...")
+    t0 = time.time()
     output_path = send_email(jobs, filtered_count=filtered_count)
+    print(f"  -> {time.time() - t0:.0f}s")
 
     print("\n" + "=" * 60)
     apply_count = len(jobs[jobs["decision_hint"] == "Apply"])
     print(f"DONE -- {len(jobs)} jobs scored, {apply_count} recommended to Apply")
     print(f"Digest: {output_path}")
+    print(f"Total pipeline time: {time.time() - pipeline_start:.0f}s")
     print("=" * 60)
 
 
