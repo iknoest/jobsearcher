@@ -1,0 +1,65 @@
+# Job search configuration
+# Add/remove keywords as needed — each keyword runs as a separate search
+
+search_keywords:
+  primary:  # Strongest match to your background
+    - "Product Owner"
+    - "Product Manager"
+    - "Product Researcher"
+    - "UX Researcher"
+    - "Innovation Engineer"
+  secondary:  # Good fit, slightly broader
+    - "Product Innovation Engineer"
+    - "Data Analyst"
+    - "Data Visualization"
+    - "Technical Product Manager"
+    - "Product Designer"
+  exploratory:  # Worth seeing, might reveal unexpected fits
+    - "Design Technologist"
+    - "AI Product Manager"
+    - "IoT Product Manager"
+    - "Research Engineer"
+    - "Strategy Consultant"
+
+platforms:
+  - linkedin
+  # - indeed     # Phase 2: hangs on Windows, needs timeout fix
+  # - google     # Phase 2: hangs on Windows, needs timeout fix
+  # - glassdoor  # Phase 2: API errors, re-enable once stable
+
+location: "Netherlands"
+country_indeed: "Netherlands"
+distance_km: 50
+results_per_keyword: 20
+hours_old: 72  # 72h for initial runs; reduce to 24h once daily cron is active
+
+# Job type filter (null = all types)
+job_type: null  # fulltime, parttime, contract, internship
+
+# Pre-LLM filters (applied before sending to LLM for scoring)
+filters:
+  # Language detection: skip JDs written primarily in Dutch
+  skip_dutch_jd: true
+  dutch_jd_threshold: 0.7  # langdetect confidence threshold
+
+  # Requirement-based filters (scan JD text)
+  skip_if_requires:
+    - driving_licence: true    # "rijbewijs", "driving licence/license"
+    - dutch_fluency: true      # "vloeiend Nederlands", "Dutch required/mandatory"
+    - german_fluency: true
+    - french_fluency: true
+
+  # Don't skip if language is "nice to have" / "preferred"
+  skip_nice_to_have_language: false
+
+  # Experience level highlighting (not filtering — just tagging)
+  experience_tags:
+    junior: ["junior", "0-3 years", "entry level", "graduate"]
+    mid: ["3-5 years", "mid-level", "medior"]
+    senior: ["senior", "5+ years", "8+ years", "lead", "principal"]
+
+  # Remote/hybrid/onsite detection keywords
+  work_mode_keywords:
+    remote: ["remote", "work from home", "WFH", "anywhere"]
+    hybrid: ["hybrid", "flexible", "2-3 days office"]
+    onsite: ["on-site", "onsite", "office-based", "in-office"]
