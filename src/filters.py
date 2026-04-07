@@ -188,7 +188,7 @@ def enrich_and_filter(df, filter_config=None):
             row["driver_license_flagged"] = False
             row["dutch_mandatory"] = False
             row["dutch_nice_to_have"] = False
-            row["work_mode"] = "Unspecified"
+            row["work_mode"] = "Remote" if row.get("is_remote") is True else "Unspecified"
             row["seniority_fit"] = "Unknown"
             row["km_visa_mentioned"] = False
             row["visa_not_supported"] = False
@@ -211,6 +211,10 @@ def enrich_and_filter(df, filter_config=None):
         detected_modes = [mode for mode, pat in WORK_MODE_PATTERNS.items() if pat.search(desc)]
         row["work_mode"] = detected_modes[0] if len(detected_modes) == 1 else (", ".join(detected_modes) if detected_modes else "Unspecified")
 
+        # Fallback: use jobspy is_remote if we couldn't detect from description
+        if row["work_mode"] == "Unspecified" and row.get("is_remote") is True:
+            row["work_mode"] = "Remote"
+
         # Seniority fit
         if SENIORITY_FIT_PATTERNS.search(desc):
             row["seniority_fit"] = "Strong"
@@ -232,6 +236,19 @@ def enrich_and_filter(df, filter_config=None):
                 period = p
                 break
         row["salary_period"] = period if row["salary_info"] else ""
+
+        # Fallback: use jobspy salary fields if regex found nothing
+        if not row["salary_info"] and row.get("min_amount") and str(row.get("min_amount")) != "nan":
+            min_amt = row.get("min_amount", "")
+            max_amt = row.get("max_amount", "")
+            currency = row.get("currency", "EUR")
+            interval = row.get("interval", "")
+            if min_amt and max_amt:
+                row["salary_info"] = f"{currency} {min_amt}-{max_amt}"
+            elif min_amt:
+                row["salary_info"] = f"{currency} {min_amt}+"
+            if interval:
+                row["salary_period"] = str(interval).capitalize()
 
         # Agency detection
         row["is_agency"] = bool(AGENCY_PATTERNS.search(desc)) or bool(AGENCY_PATTERNS.search(str(row.get("company", ""))))
