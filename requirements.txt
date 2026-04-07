@@ -1,0 +1,15 @@
+python-jobspy>=1.1.0
+anthropic>=0.40.0
+google-generativeai>=0.8.0
+openai>=1.50.0
+gspread>=6.0.0
+google-auth>=2.0.0
+langdetect>=1.0.9
+trafilatura>=2.0.0
+langid>=1.1.6
+lxml_html_clean>=0.4.4
+jinja2>=3.1.0
+pyyaml>=6.0
+pandas>=2.0.0
+requests>=2.31.0
+python-dotenv>=1.0.0
