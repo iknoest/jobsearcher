@@ -12,9 +12,11 @@ Automated Phygital-focused job search tool for the Netherlands market, with smar
 - **Phygital-weighted scoring** — Decision-first card output with 3-layer design (Decision -> Explanation -> Detail)
 - **Multi-LLM rotation** — OpenRouter free models with auto-fallback across 7 models; also supports Claude/Gemini/OpenAI API
 - **Travel time estimation** — Public transport from Hoofddorp to company (arriving 09:00 weekday)
-- **3-layer email digest** — Apply/Maybe as full decision cards, Skip as compact rows
-- **Google Sheets integration** — Job tracking, deduplication by URL, language risk populated
-- **Feedback loop** — `feedback_log.json` + Google Sheet skip reasons sync back to scoring
+- **3-layer email digest** — Apply/Maybe as full decision cards, keyword stats table, Skip summary only (details in Sheet)
+- **KM Visa sponsor checking** — IND recognized sponsor register (fuzzy match, cached locally, 30-day refresh via rapidfuzz)
+- **Google Sheets integration** — 32-column schema with LLM-extracted fields (Industry, Phygital Level, Why Fit, Gaps, Confidence)
+- **Two-way feedback loop** — User fills My Verdict + My Reason in Sheet; system detects patterns and auto-adjusts scoring weights after 5 similar signals
+- **Salary validation** — Rejects garbage values, validates min/max ranges, swaps if inverted
 - **Deduplication** — Local JSON cache + Google Sheet URL tracking
 - **Pipeline timing** — Each phase reports elapsed time for performance visibility
 - **jobspy metadata** — is_remote, salary, job_level extracted and used as filter fallbacks
@@ -50,7 +52,9 @@ Decision: **Apply** (>=75) · **Maybe** (60-74) · **Skip** (<60). Blockers over
 | Scraping | JobSpy (Python) + trafilatura (description fallback) |
 | Language Detection | langid (Dutch JD pre-filter) |
 | LLM | OpenRouter (free: Qwen 3.6+, Nemotron, Gemma, Llama) + Claude/Gemini/OpenAI fallback |
-| Storage | Google Sheets + local JSON |
+| KM Visa | IND register + rapidfuzz (fuzzy company name matching) |
+| Storage | Google Sheets (32-col schema) + local JSON |
+| Feedback | Two-way: Sheet verdicts -> pattern detection -> auto weight adjustment |
 | Notifications | Email (Gmail) + local HTML digest |
 | Travel | 9292.nl links + distance lookup table |
 

@@ -7,9 +7,11 @@ Automated job search tool for the Netherlands market. Uses n8n + JobSpy + multi-
 - **Scraping**: JobSpy library (LinkedIn active; Indeed/Google/Glassdoor disabled — hang on Windows) + **trafilatura fallback** for missing descriptions
 - **Pre-filtering**: Python rule-based filters using **langid** (Dutch JD detection, Dutch title patterns, junior roles, language requirements, driving licence, agency detection, Phygital/SaaS classification). Returns per-job filter log with reasons.
 - **Scoring**: Multi-LLM via OpenRouter (free models with auto-rotation fallback) — Phygital-weighted, decision-first card output. 15s cooldown between calls to avoid rate limits.
-- **Storage**: Google Sheets (job tracking, deduplication, feedback sync) + local JSON cache
-- **Delivery**: Email digest (daily cron + manual trigger) with 3-layer card layout
-- **Timing**: Each pipeline phase reports elapsed time
+- **KM Visa**: IND recognized sponsor register (downloaded + cached locally, 30-day refresh, fuzzy match via rapidfuzz)
+- **Storage**: Google Sheets (job tracking, deduplication, feedback sync, 32-column schema) + local JSON cache
+- **Feedback Loop**: Two-way — user fills My Verdict/My Reason in Sheet, system syncs + detects patterns + auto-adjusts weights after 5 similar signals
+- **Delivery**: Email digest (daily cron + manual trigger) — Apply/Maybe cards only, keyword stats table, Skip summary line
+- **Timing**: Each pipeline phase reports elapsed time; keyword-level job counts displayed
 
 ## Scoring Framework
 - Phygital relevance: 0-40 (physical+digital = high; pure software = low)
@@ -47,6 +49,10 @@ Automated job search tool for the Netherlands market. Uses n8n + JobSpy + multi-
 - **Python stdout buffering on Windows** — always run with `PYTHONUNBUFFERED=1` and `-u` flag for background tasks
 - **langdetect is non-deterministic** — replaced with langid for reliable Dutch detection
 - **Glassdoor API is unstable** — keep disabled until they fix their API responses
+- **IND sponsor register is an HTML table** — use trafilatura to parse, not a downloadable CSV
+- **Company names in IND register include B.V./N.V.** — rapidfuzz fuzzy matching with suffix stripping needed
+- **Feedback threshold = 5 similar disagreements** — before auto-adjusting weights by +/-5 points
+- **Salary metadata from JobSpy can be garbage** — validate min > 100, swap if inverted, reject non-numeric
 
 ## CLI Flags
 - `--manual` — Run full pipeline (scrape + filter + score + sheets + email)

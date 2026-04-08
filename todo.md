@@ -24,7 +24,17 @@
 - [x] jobspy metadata extraction (is_remote, salary, job_level as filter fallbacks)
 - [x] Language Risk populated in Google Sheets (English OK / Dutch Mandatory / Dutch Preferred)
 
-## Phase 1c: MVP — Remaining Issues
+## Phase 1c: Sheet Quality, Feedback Loop & KM Visa (completed 2026-04-09)
+- [x] Fix travel NaN -> empty string for unknown cities
+- [x] Salary validation (reject garbage values like "4-3 EUR", swap inverted min/max)
+- [x] KM Visa sponsor checking via IND register (download, cache, fuzzy match with rapidfuzz)
+- [x] Fix Google Sheet empty cells (parse LLM JSON into 32 proper columns)
+- [x] Two-way feedback loop (My Verdict/My Reason in Sheet, pattern detection, auto weight adjustment)
+- [x] Email digest cleanup (remove Skip noise, add keyword stats table with Apply/Maybe per keyword)
+- [x] Track and display jobs found per keyword in pipeline output
+- [x] Schema documentation (docs/schema.md with column definitions, scoring logic, feedback loop)
+
+## Phase 1d: Remaining Issues
 - [ ] Fix LLM JSON parsing failures (some jobs return 0% with parse error)
 - [ ] Run full keyword set (15 keywords across 3 tiers) — needs longer rate limit patience
 - [ ] Re-enable Indeed/Google/Glassdoor platforms (fix hanging on Windows, add timeouts)
@@ -40,4 +50,4 @@
 - [ ] Startup sources (Wellfound, YC, TechLeap.nl)
 - [ ] Notion integration for application tracking
 - [ ] Career 覆盤 — AI career positioning based on cross-disciplinary background
-- [ ] Google Sheets feedback sync (skip reasons pull back to feedback_log.json)
+- [x] ~~Google Sheets feedback sync~~ (replaced by two-way feedback loop in Phase 1c)
