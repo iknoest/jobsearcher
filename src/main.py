@@ -24,6 +24,7 @@ from src.matcher import score_all_jobs
 from src.travel import enrich_with_travel_time
 from src.sheets import append_jobs
 from src.notifier import send_email
+from src.feedback import sync_verdicts_from_sheet, apply_weight_adjustments
 
 
 def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
@@ -37,6 +38,15 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
     print(label)
     print("=" * 60)
     pipeline_start = time.time()
+
+    # Step 0: Sync feedback from Sheet + apply learned adjustments
+    spreadsheet_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
+    if spreadsheet_id:
+        print("\n[0/6] Syncing feedback...")
+        sync_verdicts_from_sheet(spreadsheet_id)
+    weight_adjustments = apply_weight_adjustments()
+    if weight_adjustments:
+        print(f"  Active weight adjustments: {weight_adjustments}")
 
     # Step 1: Scrape
     print("\n[1/6] Scraping jobs...")
@@ -104,7 +114,6 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
     # Step 5: Store in Google Sheets
     print("\n[5/6] Saving to Google Sheets...")
     t0 = time.time()
-    spreadsheet_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
     if spreadsheet_id:
         append_jobs(jobs, spreadsheet_id)
     else:
