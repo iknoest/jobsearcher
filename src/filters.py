@@ -131,6 +131,41 @@ DUTCH_TITLE_PATTERNS = re.compile(
 )
 
 
+def _validate_salary(min_amt, max_amt, currency="EUR", interval=""):
+    """Validate and format salary range from raw jobspy fields.
+
+    Rejects garbage values (<=100), swaps min/max if inverted.
+    Returns formatted string like "EUR 5000-8000", "EUR 5000+", or "".
+    """
+    try:
+        lo = float(min_amt) if str(min_amt).strip() not in ("", "nan", "None") else 0.0
+    except (ValueError, TypeError):
+        lo = 0.0
+    try:
+        hi = float(max_amt) if str(max_amt).strip() not in ("", "nan", "None") else 0.0
+    except (ValueError, TypeError):
+        hi = 0.0
+
+    # Reject garbage (both values <=100 or both zero)
+    if lo <= 100 and hi <= 100:
+        return ""
+
+    # Swap if inverted
+    if lo > hi > 0:
+        lo, hi = hi, lo
+
+    lo_int = int(lo) if lo > 0 else 0
+    hi_int = int(hi) if hi > 0 else 0
+
+    if lo_int > 0 and hi_int > 0:
+        return f"{currency} {lo_int}-{hi_int}"
+    elif lo_int > 0:
+        return f"{currency} {lo_int}+"
+    elif hi_int > 0:
+        return f"{currency} 0-{hi_int}"
+    return ""
+
+
 def enrich_and_filter(df, filter_config=None):
     """Apply hard filters and add enrichment columns.
 
@@ -238,17 +273,16 @@ def enrich_and_filter(df, filter_config=None):
         row["salary_period"] = period if row["salary_info"] else ""
 
         # Fallback: use jobspy salary fields if regex found nothing
-        if not row["salary_info"] and row.get("min_amount") and str(row.get("min_amount")) != "nan":
+        if not row["salary_info"]:
             min_amt = row.get("min_amount", "")
             max_amt = row.get("max_amount", "")
-            currency = row.get("currency", "EUR")
+            currency = row.get("currency", "EUR") or "EUR"
             interval = row.get("interval", "")
-            if min_amt and max_amt:
-                row["salary_info"] = f"{currency} {min_amt}-{max_amt}"
-            elif min_amt:
-                row["salary_info"] = f"{currency} {min_amt}+"
-            if interval:
-                row["salary_period"] = str(interval).capitalize()
+            validated = _validate_salary(min_amt, max_amt, currency, interval)
+            if validated:
+                row["salary_info"] = validated
+                if interval:
+                    row["salary_period"] = str(interval).capitalize()
 
         # Agency detection
         row["is_agency"] = bool(AGENCY_PATTERNS.search(desc)) or bool(AGENCY_PATTERNS.search(str(row.get("company", ""))))
