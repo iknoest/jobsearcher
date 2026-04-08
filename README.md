@@ -33,6 +33,8 @@ Automated Phygital-focused job search tool for the Netherlands market, with smar
 
 Decision: **Apply** (>=75) · **Maybe** (60-74) · **Skip** (<60). Blockers override score.
 
+> For full column definitions, scoring logic, and feedback loop details, see [docs/schema.md](docs/schema.md).
+
 ### Future / 未來功能
 - Resume & cover letter tailoring per job match
 - Career 覆盤 (retrospective) — AI-guided career positioning
