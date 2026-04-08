@@ -70,7 +70,14 @@ def scrape_all_keywords(config=None, tiers=None):
             print(f"  [{tier}] '{keyword}': ERROR - {e}")
 
     if not all_jobs:
-        return pd.DataFrame()
+        return pd.DataFrame(), {}
+
+    # Track per-keyword counts (before dedup)
+    keyword_counts = {}
+    for kw_df in all_jobs:
+        if not kw_df.empty:
+            kw = kw_df["search_keyword"].iloc[0]
+            keyword_counts[kw] = keyword_counts.get(kw, 0) + len(kw_df)
 
     combined = pd.concat(all_jobs, ignore_index=True)
     # Deduplicate by job URL
@@ -98,9 +105,9 @@ def scrape_all_keywords(config=None, tiers=None):
     elapsed = time.time() - start
     print(f"  Scraping took {elapsed:.0f}s")
 
-    return combined
+    return combined, keyword_counts
 
 
 if __name__ == "__main__":
-    df = scrape_all_keywords()
+    df, _ = scrape_all_keywords()
     print(df[["title", "company", "location", "search_keyword"]].head(20))

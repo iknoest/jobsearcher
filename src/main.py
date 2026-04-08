@@ -52,11 +52,15 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
     print("\n[1/6] Scraping jobs...")
     t0 = time.time()
     tiers = ["primary"] if quick else None
-    jobs = scrape_all_keywords(tiers=tiers)
+    jobs, keyword_counts = scrape_all_keywords(tiers=tiers)
     print(f"  -> {time.time() - t0:.0f}s")
     if jobs.empty:
         print("No jobs found. Exiting.")
         return
+    if keyword_counts:
+        print(f"\n  Jobs per keyword (before dedup):")
+        for kw, count in sorted(keyword_counts.items(), key=lambda x: -x[1]):
+            print(f"    {kw}: {count}")
     total_scraped = len(jobs)
 
     # Step 2: Filter + Enrich
