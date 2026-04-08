@@ -14,14 +14,49 @@ SCOPES = [
 ]
 
 HEADERS = [
-    "Date", "Score", "Decision", "Title", "Company", "Location",
-    "Work Mode", "Role Cluster", "Phygital", "SaaS",
-    "Seniority Fit", "Language Risk", "Driver Licence",
-    "Salary", "KM Visa", "Agency", "Travel Min",
+    "Date", "Score", "Decision", "Title", "Company", "Industry",
+    "Location", "Work Mode", "Role Cluster", "Phygital Level",
+    "Phygital Reason", "SaaS", "Seniority Fit",
+    "Language Risk", "Driver Licence",
+    "Salary", "KM Visa (JD)", "KM Visa (IND)", "Agency",
+    "Travel Min", "Commute",
     "Why Fit", "Why Not Fit", "Gap Analysis",
+    "Top Label", "Main Risk", "Confidence",
     "Job URL", "Travel Link", "Search Keyword",
-    "Status", "Skip Reason", "Notes",
+    "My Verdict", "My Reason",
 ]
+
+
+def _extract_from_match_result(row):
+    """Extract structured fields from the LLM match_result JSON."""
+    try:
+        r = json.loads(row.get("match_result", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        r = {}
+
+    card = r.get("CardSummary", {})
+    sig = r.get("DecisionSignals", {})
+    fit = r.get("WhyFit", {})
+    phy = r.get("PhygitalAssessment", {})
+    co = r.get("CompanySnapshot", {})
+    trust = r.get("TrustNotes", {})
+
+    return {
+        "industry": co.get("Industry", ""),
+        "company_size": co.get("Size", ""),
+        "why_fit": "; ".join(fit.get("StrongMatch", []) + fit.get("PartialMatch", [])),
+        "why_not_fit": "; ".join(r.get("Gaps", []) + r.get("Risks", [])),
+        "gap_analysis": "; ".join(r.get("Gaps", [])),
+        "phygital_level": phy.get("Level", ""),
+        "phygital_reason": phy.get("Reason", ""),
+        "top_label": card.get("TopLabel", ""),
+        "main_risk": card.get("MainRisk", ""),
+        "confidence": trust.get("Confidence", ""),
+        "work_mode_llm": sig.get("WorkMode", ""),
+        "salary_llm": sig.get("SalaryText", ""),
+        "commute_llm": sig.get("CommuteText", ""),
+        "language_llm": sig.get("LanguageText", ""),
+    }
 
 
 def get_client():
@@ -37,7 +72,7 @@ def get_or_create_worksheet(spreadsheet_id, sheet_name="Jobs"):
     try:
         worksheet = spreadsheet.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
-        worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=30)
+        worksheet = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=35)
         worksheet.update("A1", [HEADERS])
 
     return worksheet
@@ -51,7 +86,7 @@ def get_existing_urls(spreadsheet_id, sheet_name="Jobs"):
         worksheet = spreadsheet.worksheet(sheet_name)
         # Find Job URL column dynamically
         headers = worksheet.row_values(1)
-        url_col = headers.index("Job URL") + 1 if "Job URL" in headers else 21
+        url_col = headers.index("Job URL") + 1 if "Job URL" in headers else 28
         urls = worksheet.col_values(url_col)
         return set(urls[1:])
     except Exception:
@@ -72,33 +107,44 @@ def append_jobs(df, spreadsheet_id, sheet_name="Jobs"):
         if url in existing_urls:
             continue
 
+        llm = _extract_from_match_result(row)
+
+        lang_risk = "Dutch Mandatory" if row.get("dutch_mandatory") else (
+            "Dutch Preferred" if row.get("dutch_nice_to_have") else "English OK")
+
         new_rows.append([
-            today,
-            str(row.get("match_score", "")),
-            str(row.get("decision_hint", "")),
-            str(row.get("title", "")),
-            str(row.get("company", "")),
-            str(row.get("location", "")),
-            str(row.get("work_mode", "")),
-            str(row.get("role_cluster", "")),
-            str(row.get("phygital_detected", "")),
-            str(row.get("pure_saas_detected", "")),
-            str(row.get("seniority_fit", "")),
-            "Dutch Mandatory" if row.get("dutch_mandatory") else ("Dutch Preferred" if row.get("dutch_nice_to_have") else "English OK"),
-            str(row.get("driver_license_flagged", "")),
-            str(row.get("salary_info", "")),
-            str(row.get("km_visa_mentioned", "")),
-            str(row.get("is_agency", "")),
-            str(row.get("travel_minutes", "")),
-            str(row.get("why_fit", "")),
-            str(row.get("why_not_fit", "")),
-            str(row.get("gap_analysis", "")),
-            url,
-            str(row.get("travel_link", "")),
-            str(row.get("search_keyword", "")),
-            "New",
-            "",  # Skip Reason (user fills in)
-            "",  # Notes
+            today,                                              # Date
+            str(row.get("match_score", "")),                    # Score
+            str(row.get("decision_hint", "")),                  # Decision
+            str(row.get("title", "")),                          # Title
+            str(row.get("company", "")),                        # Company
+            llm["industry"],                                    # Industry
+            str(row.get("location", "")),                       # Location
+            llm["work_mode_llm"] or str(row.get("work_mode", "")),  # Work Mode
+            str(row.get("role_cluster", "")),                   # Role Cluster
+            llm["phygital_level"],                              # Phygital Level
+            llm["phygital_reason"],                             # Phygital Reason
+            str(row.get("pure_saas_detected", "")),             # SaaS
+            str(row.get("seniority_fit", "")),                  # Seniority Fit
+            lang_risk,                                          # Language Risk
+            str(row.get("driver_license_flagged", "")),         # Driver Licence
+            llm["salary_llm"] or str(row.get("salary_info", "")),  # Salary
+            str(row.get("km_visa_mentioned", "")),              # KM Visa (JD)
+            str(row.get("km_visa_sponsor", "")),                # KM Visa (IND)
+            str(row.get("is_agency", "")),                      # Agency
+            str(row.get("travel_minutes", "")),                 # Travel Min
+            llm["commute_llm"],                                 # Commute
+            llm["why_fit"],                                     # Why Fit
+            llm["why_not_fit"],                                 # Why Not Fit
+            llm["gap_analysis"],                                # Gap Analysis
+            llm["top_label"],                                   # Top Label
+            llm["main_risk"],                                   # Main Risk
+            llm["confidence"],                                  # Confidence
+            url,                                                # Job URL
+            str(row.get("travel_link", "")),                    # Travel Link
+            str(row.get("search_keyword", "")),                 # Search Keyword
+            "",                                                 # My Verdict (user fills)
+            "",                                                 # My Reason (user fills)
         ])
 
     if new_rows:
