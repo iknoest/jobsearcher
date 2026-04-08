@@ -89,7 +89,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
         print(f"\n[Scrape-only] {len(jobs)} jobs after filtering:")
         cols = ["title", "company", "work_mode", "phygital_detected", "driver_license_flagged", "dutch_mandatory"]
         existing = [c for c in cols if c in jobs.columns]
-        print(jobs[existing].to_string())
+        print(jobs[existing].to_string().encode("ascii", errors="replace").decode("ascii"))
         os.makedirs("output", exist_ok=True)
         jobs.to_csv("output/scrape_results.csv", index=False)
         print("Saved to output/scrape_results.csv")

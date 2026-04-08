@@ -47,8 +47,20 @@ def download_ind_register():
     sponsors = {}
     for line in text.strip().split("\n"):
         line = line.strip()
-        if not line:
+        if not line or line.startswith("|---") or line.startswith("| Organisation"):
             continue
+        # Handle markdown table format: | Company Name | 12345678 |
+        if line.startswith("|"):
+            parts = [p.strip() for p in line.split("|") if p.strip()]
+            if len(parts) >= 2:
+                company = parts[0]
+                kvk_candidate = parts[-1]
+                if re.match(r"^\d{8}$", kvk_candidate):
+                    normalized = normalize_company_name(company)
+                    if len(normalized) >= 2:  # Skip garbage entries
+                        sponsors[normalized] = kvk_candidate
+                    continue
+        # Fallback: plain text with KvK at end
         kvk_match = re.search(r"(\d{8})\s*$", line)
         if kvk_match:
             kvk = kvk_match.group(1)
@@ -93,8 +105,12 @@ def is_km_sponsor(company_name, sponsors=None):
     if normalized in sponsors:
         return True
 
-    # 2. Substring match
+    # 2. Substring match — only if shorter string is >50% of longer string length
     for sponsor_name in sponsors:
+        shorter = min(len(sponsor_name), len(normalized))
+        longer = max(len(sponsor_name), len(normalized))
+        if shorter < 3 or shorter / longer < 0.5:
+            continue
         if normalized in sponsor_name or sponsor_name in normalized:
             return True
 
