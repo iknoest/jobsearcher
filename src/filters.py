@@ -10,6 +10,8 @@ import pandas as pd
 import langid
 import yaml
 
+from src.km_visa import is_km_sponsor, load_or_download_sponsors
+
 
 def load_filter_config(config_path="config/search.yaml"):
     with open(config_path, "r", encoding="utf-8") as f:
@@ -184,6 +186,8 @@ def enrich_and_filter(df, filter_config=None):
     if df.empty:
         return df, []
 
+    km_sponsors = load_or_download_sponsors()
+
     results = []
     filtered_log = []  # List of {title, company, reason} for filtered jobs
 
@@ -226,6 +230,7 @@ def enrich_and_filter(df, filter_config=None):
             row["work_mode"] = "Remote" if row.get("is_remote") is True else "Unspecified"
             row["seniority_fit"] = "Unknown"
             row["km_visa_mentioned"] = False
+            row["km_visa_sponsor"] = is_km_sponsor(str(row.get("company", "")), km_sponsors)
             row["visa_not_supported"] = False
             row["salary_info"] = ""
             row["salary_period"] = ""
@@ -258,6 +263,7 @@ def enrich_and_filter(df, filter_config=None):
 
         # KM visa
         row["km_visa_mentioned"] = bool(KM_VISA_PATTERNS.search(desc))
+        row["km_visa_sponsor"] = is_km_sponsor(str(row.get("company", "")), km_sponsors)
 
         # Visa not supported
         row["visa_not_supported"] = bool(VISA_NOT_SUPPORTED_PATTERNS.search(desc))
