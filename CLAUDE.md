@@ -32,9 +32,21 @@ Automated job search tool for the Netherlands market. Uses n8n + JobSpy + multi-
 - Domain preference: Phygital (physical product + software/digital integration)
 - LLM output: reasoning in Traditional Chinese, raw data in English
 
-## Documentation
-- When updating any doc file, ALWAYS check and update: CLAUDE.md, README.md, todo.md
+## Documentation Rules
+- **After ANY code change that completes a feature, fix, or refactor**: automatically update CLAUDE.md, README.md, and todo.md. Do NOT wait to be asked.
+- **After ANY task/plan execution completes**: update todo.md to check off completed items and add new items if discovered.
 - Produce bilingual documentation (English + Chinese) unless told otherwise
+- CLAUDE.md = project rules + architecture + constraints (for AI context)
+- README.md = user-facing docs with bilingual headers (for humans)
+- todo.md = progress tracking with phases and checkboxes
+
+## Lessons Learned
+- **LinkedIn via JobSpy always returns empty descriptions** — trafilatura fallback is mandatory, not optional
+- **OpenRouter free tier rate limits aggressively** — 15s cooldown between calls, 7-model rotation needed, expect ~3 min per job scored. For 80 jobs = ~40 min.
+- **Indeed/Google/Glassdoor scraping hangs on Windows** — needs per-request timeouts before re-enabling
+- **Python stdout buffering on Windows** — always run with `PYTHONUNBUFFERED=1` and `-u` flag for background tasks
+- **langdetect is non-deterministic** — replaced with langid for reliable Dutch detection
+- **Glassdoor API is unstable** — keep disabled until they fix their API responses
 
 ## CLI Flags
 - `--manual` — Run full pipeline (scrape + filter + score + sheets + email)
