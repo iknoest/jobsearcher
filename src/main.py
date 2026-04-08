@@ -126,7 +126,21 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
     # Step 6: Send email digest
     print("\n[6/6] Building digest...")
     t0 = time.time()
-    output_path = send_email(jobs, filtered_count=filtered_count)
+
+    # Build keyword stats for digest
+    keyword_stats = []
+    if "search_keyword" in jobs.columns:
+        for kw in jobs["search_keyword"].unique():
+            kw_jobs = jobs[jobs["search_keyword"] == kw]
+            keyword_stats.append({
+                "keyword": kw,
+                "found": len(kw_jobs),
+                "apply": len(kw_jobs[kw_jobs["decision_hint"] == "Apply"]),
+                "maybe": len(kw_jobs[kw_jobs["decision_hint"] == "Maybe"]),
+            })
+        keyword_stats.sort(key=lambda x: x["apply"] + x["maybe"], reverse=True)
+
+    output_path = send_email(jobs, filtered_count=filtered_count, keyword_stats=keyword_stats)
     print(f"  -> {time.time() - t0:.0f}s")
 
     print("\n" + "=" * 60)
