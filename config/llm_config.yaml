@@ -1,0 +1,44 @@
+# Multi-LLM rotation config
+# The system tries models in priority order; if rate-limited, falls back to next
+
+models:
+  openrouter:
+    provider: openrouter
+    model: qwen/qwen3-next-80b-a3b-instruct:free
+    env_key: OPENROUTER_API_KEY
+    priority: 1
+    daily_quota: 200
+    reset_hour_utc: 0
+
+  gemini:
+    provider: google
+    model: gemini-2.0-flash
+    env_key: GOOGLE_GEMINI_API_KEY
+    priority: 1
+    daily_quota: 1500
+    reset_hour_utc: 0
+
+  claude:
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    env_key: ANTHROPIC_API_KEY
+    priority: 2
+    daily_quota: 100
+    reset_hour_utc: 0
+
+  chatgpt:
+    provider: openai
+    model: gpt-4o-mini
+    env_key: OPENAI_API_KEY
+    priority: 3
+    daily_quota: 200
+    reset_hour_utc: 0
+
+# Fallback behavior
+fallback_strategy: "round_robin"  # or "priority" (always try highest first)
+retry_on_rate_limit: true
+retry_delay_seconds: 60
+
+# Token limits per request
+max_input_tokens: 4000  # JD + CV context
+max_output_tokens: 1500  # Scoring response
