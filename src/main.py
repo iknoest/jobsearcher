@@ -19,7 +19,7 @@ load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.scraper import scrape_all_keywords
-from src.filters import enrich_and_filter
+from src.filters import enrich_and_filter, language_prefilter
 from src.matcher import score_all_jobs
 from src.travel import enrich_with_travel_time
 from src.sheets import append_jobs
@@ -42,14 +42,14 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
     # Step 0: Sync feedback from Sheet + apply learned adjustments
     spreadsheet_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
     if spreadsheet_id:
-        print("\n[0/6] Syncing feedback...")
+        print("\n[0/7] Syncing feedback...")
         sync_verdicts_from_sheet(spreadsheet_id)
     weight_adjustments = apply_weight_adjustments()
     if weight_adjustments:
         print(f"  Active weight adjustments: {weight_adjustments}")
 
     # Step 1: Scrape
-    print("\n[1/6] Scraping jobs...")
+    print("\n[1/7] Scraping jobs...")
     t0 = time.time()
     tiers = ["primary"] if quick else None
     jobs, keyword_counts = scrape_all_keywords(tiers=tiers)
@@ -63,10 +63,24 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
             print(f"    {kw}: {count}")
     total_scraped = len(jobs)
 
-    # Step 2: Filter + Enrich
-    print("\n[2/6] Filtering & enriching...")
+    # Step 2: Language pre-filter (hard reject Dutch-mandatory jobs)
+    print("\n[2/7] Language pre-filter...")
+    t0 = time.time()
+    jobs, lang_rejections = language_prefilter(jobs)
+    if lang_rejections:
+        print(f"  Rejected at Language Pre-filter:")
+        for entry in lang_rejections:
+            print(f"    [{entry['SkipReason']}] {entry['title']} @ {entry['company']}")
+    print(f"  -> {time.time() - t0:.0f}s")
+    if jobs.empty:
+        print("All jobs rejected by language pre-filter. Exiting.")
+        return
+
+    # Step 3: Enrich + remaining filters
+    print("\n[3/7] Enriching & filtering...")
     t0 = time.time()
     jobs, filter_log = enrich_and_filter(jobs)
+    filter_log = lang_rejections + filter_log
     filtered_count = len(filter_log)
     if filter_log:
         print(f"\n  Pre-filtered jobs:")
@@ -77,8 +91,8 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
         print("All jobs filtered out. Exiting.")
         return
 
-    # Step 3: Travel time
-    print("\n[3/6] Estimating travel times...")
+    # Step 4: Travel time
+    print("\n[4/7] Estimating travel times...")
     t0 = time.time()
     origin = os.getenv("HOME_STATION", "Hoofddorp")
     arrival = os.getenv("ARRIVAL_TIME", "09:00")
@@ -95,13 +109,13 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
         print("Saved to output/scrape_results.csv")
         return
 
-    # Step 4: LLM scoring
+    # Step 5: LLM scoring
     t0 = time.time()
     if max_jobs:
         jobs = jobs.head(max_jobs)
-        print(f"\n[4/6] Scoring {len(jobs)} jobs with LLM (capped at {max_jobs})...")
+        print(f"\n[5/7] Scoring {len(jobs)} jobs with LLM (capped at {max_jobs})...")
     else:
-        print("\n[4/6] Scoring with LLM (Phygital-weighted framework)...")
+        print("\n[5/7] Scoring with LLM (Phygital-weighted framework)...")
     jobs = score_all_jobs(jobs, min_score=min_score)
     print(f"  -> {time.time() - t0:.0f}s")
     if jobs.empty:
@@ -115,8 +129,8 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
         marker = {"Apply": "+", "Maybe": "~", "Skip": "-"}.get(hint, "?")
         print(f"  [{marker}] {row.get('match_score', 0):3d}% {row.get('title', '?')} @ {row.get('company', '?')}")
 
-    # Step 5: Store in Google Sheets
-    print("\n[5/6] Saving to Google Sheets...")
+    # Step 6: Store in Google Sheets
+    print("\n[6/7] Saving to Google Sheets...")
     t0 = time.time()
     if spreadsheet_id:
         append_jobs(jobs, spreadsheet_id)
@@ -127,8 +141,8 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
 
     print(f"  -> {time.time() - t0:.0f}s")
 
-    # Step 6: Send email digest
-    print("\n[6/6] Building digest...")
+    # Step 7: Send email digest
+    print("\n[7/7] Building digest...")
     t0 = time.time()
 
     # Build keyword stats for digest

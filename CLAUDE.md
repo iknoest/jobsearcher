@@ -5,7 +5,8 @@ Automated job search tool for the Netherlands market. Uses n8n + JobSpy + multi-
 ## Architecture
 - **Orchestration**: n8n (local Docker) triggers Python scripts; also supports manual CLI trigger
 - **Scraping**: JobSpy library (LinkedIn active; Indeed/Google/Glassdoor disabled — hang on Windows) + **trafilatura fallback** for missing descriptions
-- **Pre-filtering**: Python rule-based filters using **langid** (Dutch JD detection, Dutch title patterns, junior roles, language requirements, driving licence, agency detection, Phygital/SaaS classification). Returns per-job filter log with reasons.
+- **Language Pre-Filter (Step 2)**: Hard-rejects Dutch-mandatory jobs BEFORE any other processing. Rejects on: (a) explicit "Dutch required/mandatory/verplicht/vloeiend Nederlands", (b) JD primarily in Dutch (langid), (c) Dutch title keywords. "Dutch is a plus" passes through. Never scored.
+- **Enrichment + Soft Filters (Step 3)**: Python rule-based filters using **langid** (junior role rejection, driving licence, agency detection, Phygital/SaaS classification, KM visa). Returns per-job filter log with reasons.
 - **Scoring**: Multi-LLM via OpenRouter (free models with auto-rotation fallback) — Phygital-weighted, decision-first card output. 15s cooldown between calls to avoid rate limits.
 - **KM Visa**: IND recognized sponsor register (downloaded + cached locally, 30-day refresh, fuzzy match via rapidfuzz)
 - **Storage**: Google Sheets (job tracking, deduplication, feedback sync, 32-column schema) + local JSON cache
@@ -41,6 +42,17 @@ Automated job search tool for the Netherlands market. Uses n8n + JobSpy + multi-
 - CLAUDE.md = project rules + architecture + constraints (for AI context)
 - README.md = user-facing docs with bilingual headers (for humans)
 - todo.md = progress tracking with phases and checkboxes
+
+## Pipeline Order (enforced)
+1. Scrape
+2. **Language Pre-Filter** (hard reject)
+3. Enrich + soft filters (agency, phygital, salary, KM visa, seniority)
+4. Travel time
+5. LLM scoring
+6. Sheets sync
+7. Email digest
+
+Language filtering MUST happen before scoring — never after. Phygital=True requires physical/hardware context; "IoT"/"AI"/"digital twin" alone are not sufficient.
 
 ## Lessons Learned
 - **LinkedIn via JobSpy always returns empty descriptions** — trafilatura fallback is mandatory, not optional

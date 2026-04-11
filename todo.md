@@ -34,7 +34,13 @@
 - [x] Track and display jobs found per keyword in pipeline output
 - [x] Schema documentation (docs/schema.md with column definitions, scoring logic, feedback loop)
 
-## Phase 1d: Remaining Issues
+## Phase 1d: Pipeline Ordering & Filter Hardening (completed 2026-04-11)
+- [x] Language Pre-Filter as Step 2 — hard reject Dutch-mandatory jobs before scoring (issue #1)
+- [x] Strengthen Phygital detection — require physical/hardware context, not just "IoT"/"AI"/"digital twin"
+- [x] Separate language_prefilter() from enrich_and_filter() (two distinct pipeline stages)
+- [x] Add pytest coverage for language_prefilter and detect_phygital (15 new tests)
+
+## Phase 1e: Remaining Issues
 - [ ] Fix LLM JSON parsing failures (some jobs return 0% with parse error)
 - [ ] Run full keyword set (15 keywords across 3 tiers) — needs longer rate limit patience
 - [ ] Re-enable Indeed/Google/Glassdoor platforms (fix hanging on Windows, add timeouts)

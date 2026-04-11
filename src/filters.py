@@ -101,14 +101,33 @@ AGENCY_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-PHYGITAL_PATTERNS = re.compile(
-    r"\b(iot|internet\s+of\s+things|automotive|robotics|consumer\s+electronics|"
-    r"smart\s+device|mobility|hardware|sensor|embedded|wearable|"
+STRONG_PHYGITAL_PATTERNS = re.compile(
+    r"\b(robotics|hardware|sensor|embedded|wearable|firmware|"
     r"manufacturing|physical\s+product|connected\s+device|medtech|"
-    r"medical\s+device|ev\s|electric\s+vehicle|3d\s+print|"
-    r"industrial\s+automation|mechatronics|firmware)\b",
+    r"medical\s+device|electric\s+vehicle|3d\s+print|"
+    r"industrial\s+automation|mechatronics|consumer\s+electronics|"
+    r"automotive|smart\s+device|ev\s+charging|mobility\s+(hardware|device))\b",
     re.IGNORECASE,
 )
+
+WEAK_PHYGITAL_SIGNALS = re.compile(
+    r"\b(iot|internet\s+of\s+things|digital\s+twin|simulation|"
+    r"artificial\s+intelligence|\bai\b|platform|cloud)\b",
+    re.IGNORECASE,
+)
+
+
+def detect_phygital(description):
+    """Phygital only True when physical/hardware context is clearly mentioned.
+
+    Buzzwords like 'IoT', 'digital twin', 'AI' alone are NOT enough —
+    they must co-occur with hardware, sensors, or physical equipment.
+    """
+    if not description:
+        return False
+    if STRONG_PHYGITAL_PATTERNS.search(description):
+        return True
+    return False
 
 PURE_SAAS_PATTERNS = re.compile(
     r"\b(saas|cloud\s+platform|web\s+application|fintech\s+platform|"
@@ -168,16 +187,78 @@ def _validate_salary(min_amt, max_amt, currency="EUR", interval=""):
     return ""
 
 
+def language_prefilter(df):
+    """Hard-reject Dutch-language jobs BEFORE any other processing.
+
+    This is the first pipeline filter — jobs here are never scored, never
+    enriched, never shown to the user. Rejection is on three grounds:
+
+    1. Explicit 'Dutch mandatory/required' phrasing in the JD
+       (even if the surrounding text is English)
+    2. The JD is primarily written in Dutch (langid detection)
+    3. The title contains Dutch role keywords (medewerker, beheerder, etc.)
+
+    Exception: 'Dutch is a plus / preferred / nice to have' passes through.
+
+    Returns:
+        (kept_df, rejection_log) where rejection_log is a list of
+        {title, company, reason, SkipReason, Stage}.
+    """
+    if df.empty:
+        return df, []
+
+    kept = []
+    rejected = []
+
+    for _, row in df.iterrows():
+        desc = str(row.get("description", ""))
+        title = str(row.get("title", ""))
+        company = str(row.get("company", ""))
+        has_desc = bool(desc and desc.strip() not in ("", "None", "nan") and len(desc.strip()) >= 30)
+
+        skip_reason = None
+
+        # Check 1: Dutch title pattern (catches empty-description jobs too)
+        if DUTCH_TITLE_PATTERNS.search(title):
+            skip_reason = "Dutch Title"
+
+        # Check 2: Explicit "Dutch mandatory" phrasing, even in English JD
+        elif has_desc:
+            has_required = bool(DUTCH_REQUIRED_PATTERNS.search(desc))
+            has_nice = bool(DUTCH_NICE_TO_HAVE_PATTERNS.search(desc))
+            if has_required and not has_nice:
+                skip_reason = "Dutch Mandatory"
+            # Check 3: JD primarily written in Dutch
+            elif is_dutch_jd(desc):
+                skip_reason = "Dutch JD"
+
+        if skip_reason:
+            rejected.append({
+                "title": title[:60],
+                "company": company[:30],
+                "reason": skip_reason,
+                "SkipReason": skip_reason,
+                "Stage": "Language Pre-filter",
+            })
+            continue
+
+        kept.append(row)
+
+    kept_df = pd.DataFrame(kept) if kept else pd.DataFrame(columns=df.columns)
+    print(f"Language pre-filter: {len(df)} -> {len(kept_df)} jobs ({len(rejected)} rejected)")
+    return kept_df, rejected
+
+
 def enrich_and_filter(df, filter_config=None):
-    """Apply hard filters and add enrichment columns.
+    """Apply remaining filters and add enrichment columns.
+
+    Assumes language_prefilter() has already run — does NOT re-check Dutch.
 
     Hard filters (remove job):
-    - Dutch-only JDs (or empty JD with Dutch title)
     - Junior/entry-level roles
-    - Empty/missing descriptions (unreviewable)
 
     Soft flags (keep job, add metadata):
-    - Driving licence, Dutch required/preferred, work mode, salary,
+    - Driving licence, Dutch nice-to-have, work mode, salary,
       agency, phygital, KM visa, seniority, visa support
     """
     if filter_config is None:
@@ -201,17 +282,7 @@ def enrich_and_filter(df, filter_config=None):
         has_description = bool(desc and desc.strip() not in ("", "None", "nan") and len(desc.strip()) >= 30)
         row["missing_description"] = not has_description
 
-        # 1. Dutch-only JD (by description or by Dutch title keywords) — only check if we have text
-        if filter_config.get("skip_dutch_jd", True):
-            if (has_description and is_dutch_jd(desc)) or DUTCH_TITLE_PATTERNS.search(title):
-                filtered_log.append({
-                    "title": title[:60],
-                    "company": str(row.get("company", ""))[:30],
-                    "reason": "Dutch JD" if (has_description and is_dutch_jd(desc)) else "Dutch title",
-                })
-                continue
-
-        # 2. Junior/entry-level (reject) — only if we have description to check
+        # 1. Junior/entry-level (reject) — only if we have description to check
         if has_description and SENIORITY_REJECT_PATTERNS.search(desc) and not SENIORITY_FIT_PATTERNS.search(desc):
             filtered_log.append({
                 "title": title[:60],
@@ -293,8 +364,8 @@ def enrich_and_filter(df, filter_config=None):
         # Agency detection
         row["is_agency"] = bool(AGENCY_PATTERNS.search(desc)) or bool(AGENCY_PATTERNS.search(str(row.get("company", ""))))
 
-        # Phygital detection
-        row["phygital_detected"] = bool(PHYGITAL_PATTERNS.search(desc))
+        # Phygital detection — strong (physical/hardware context) only
+        row["phygital_detected"] = detect_phygital(desc)
         row["pure_saas_detected"] = bool(PURE_SAAS_PATTERNS.search(desc)) and not row["phygital_detected"]
 
         results.append(row)
