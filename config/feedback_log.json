@@ -1,0 +1,24 @@
+{
+  "negative_feedback": [
+    {
+      "reason": "Pure Software / SaaS",
+      "penalty": -40,
+      "note": "User prefers Phygital roles (physical + digital). Pure SaaS without hardware/physical component is not a good fit."
+    }
+  ],
+  "positive_signals": [
+    "IoT",
+    "Automotive",
+    "Robotics",
+    "Consumer Electronics",
+    "Smart Devices",
+    "Mobility",
+    "Hardware",
+    "Sensor",
+    "MedTech"
+  ],
+  "skipped_job_ids": [],
+  "user_verdicts": [],
+  "weight_adjustments": [],
+  "pattern_counts": {}
+}

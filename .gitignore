@@ -1,0 +1,35 @@
+# Environment
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# n8n data (local Docker volume, not tracked)
+n8n-data/
+
+# Personal data
+profile/cv_*.pdf
+profile/cover_letter_*.pdf
+profile/
+output/
+
+# Google service account credentials
+*.json
+!config/km_sponsors.json
+!config/feedback_log.json
+
+# Claude internal
+.claude/
+docs/superpowers/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
