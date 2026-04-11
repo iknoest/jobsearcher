@@ -83,7 +83,14 @@ def save_seen_job_ids(ids, path="output/seen_jobs.json"):
         json.dump(list(ids), f)
 
 
-SCORING_PROMPT = """You are a UX-aware Job Decision Layer for a senior Product Researcher in the Netherlands.
+SCORING_PROMPT = """### OUTPUT CONTRACT — READ FIRST
+Your entire response MUST be a single JSON object and NOTHING else.
+- First character: `{`
+- Last character: `}`
+- No preamble. No "Let me think...". No markdown fences. No comments after.
+- If you violate this, the response is discarded.
+
+You are a UX-aware Job Decision Layer for a senior Product Researcher in the Netherlands.
 
 Your job is NOT to write a long analysis report.
 Your job is to transform a job posting into a decision-ready, trustable, low-cognitive-load assessment.
@@ -148,7 +155,8 @@ Your job is to transform a job posting into a decision-ready, trustable, low-cog
    - Maybe: 60-74, good relevance but real uncertainty
    - Skip: < 60, or fit depends on too many assumptions
 
-Return ONLY valid JSON (no markdown fences, no explanation outside JSON):
+### REMINDER: Output ONLY the JSON object below. Start with `{{` and end with `}}`. No other text.
+
 {{
   "CardSummary": {{
     "MatchScore": 0,

@@ -166,6 +166,13 @@ OPENROUTER_FREE_MODELS = [
 ]
 
 
+_JSON_SYSTEM = (
+    "You are a strict JSON generator. Your entire response MUST be a single JSON "
+    "object starting with `{` and ending with `}`. No prose, no markdown fences, "
+    "no explanation. If the user's prompt asks for JSON, output only JSON."
+)
+
+
 def _call_openrouter(prompt, config):
     from openai import OpenAI
 
@@ -180,13 +187,36 @@ def _call_openrouter(prompt, config):
             response = client.chat.completions.create(
                 model=model_id,
                 max_tokens=config.get("max_output_tokens", 1500),
-                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                messages=[
+                    {"role": "system", "content": _JSON_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
             )
             if response.choices and response.choices[0].message.content:
                 return response.choices[0].message.content
         except Exception as e:
-            if "429" in str(e):
+            err_str = str(e)
+            if "429" in err_str:
                 time.sleep(2)  # Brief pause before trying next model
+                continue
+            # Some free models don't support response_format; retry without it
+            if "response_format" in err_str or "json_object" in err_str:
+                try:
+                    response = client.chat.completions.create(
+                        model=model_id,
+                        max_tokens=config.get("max_output_tokens", 1500),
+                        temperature=0.1,
+                        messages=[
+                            {"role": "system", "content": _JSON_SYSTEM},
+                            {"role": "user", "content": prompt},
+                        ],
+                    )
+                    if response.choices and response.choices[0].message.content:
+                        return response.choices[0].message.content
+                except Exception:
+                    continue
                 continue
             raise  # Re-raise non-rate-limit errors
 
