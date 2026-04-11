@@ -64,6 +64,20 @@ def test_prefilter_rejects_dutch_title():
     assert rejected[0]["SkipReason"] == "Dutch Title"
 
 
+def test_prefilter_rejects_applicatiemanager():
+    df = pd.DataFrame([_row(title="Product Owner CRM/Applicatiemanager", description="English " * 20)])
+    kept, rejected = language_prefilter(df)
+    assert len(kept) == 0
+    assert rejected[0]["SkipReason"] == "Dutch Title"
+
+
+def test_prefilter_rejects_conversieteam():
+    df = pd.DataFrame([_row(title="Product Owner Conversieteam (CRO/Growth)", description="English " * 20)])
+    kept, rejected = language_prefilter(df)
+    assert len(kept) == 0
+    assert rejected[0]["SkipReason"] == "Dutch Title"
+
+
 def test_prefilter_keeps_english_job():
     df = pd.DataFrame([_row(description="Senior Product Researcher role. " + "english context " * 20)])
     kept, rejected = language_prefilter(df)

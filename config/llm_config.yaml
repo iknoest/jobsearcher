@@ -41,4 +41,4 @@ retry_delay_seconds: 60
 
 # Token limits per request
 max_input_tokens: 4000  # JD + CV context
-max_output_tokens: 1500  # Scoring response
+max_output_tokens: 2500  # Scoring response (increased to avoid JSON truncation)

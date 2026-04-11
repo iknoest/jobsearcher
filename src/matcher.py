@@ -7,11 +7,53 @@ Layer 3: Expandable detail (Phygital, Company, ScoreBreakdown, TrustNotes)
 """
 
 import json
+import re
 import yaml
 import pandas as pd
 from pathlib import Path
 from src.llm import router
 from src.feedback import apply_weight_adjustments
+
+
+def _extract_json(text):
+    """Pull the first balanced JSON object out of an LLM response.
+
+    Handles: markdown fences, leading/trailing prose, nested braces,
+    braces inside string literals.
+    """
+    if not text:
+        return None
+    s = text.strip()
+    # Strip common markdown fences
+    s = re.sub(r"^```(?:json)?\s*", "", s)
+    s = re.sub(r"\s*```$", "", s)
+
+    start = s.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start : i + 1]
+    return None
 
 
 def load_profile(config_path="config/profile.yaml"):
@@ -190,54 +232,59 @@ def score_job(job_row, profile=None, feedback_log=None, weight_adjustments=None)
 
     response = router.call_llm(prompt)
 
-    # Clean markdown fences if present
-    cleaned = response.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-    cleaned = cleaned.strip()
+    json_blob = _extract_json(response)
+    parse_error = None
+    result = None
 
-    try:
-        result = json.loads(cleaned)
+    if json_blob:
+        try:
+            result = json.loads(json_blob)
+        except json.JSONDecodeError as e:
+            parse_error = f"json.loads: {str(e)[:80]}"
+    else:
+        parse_error = "no JSON object found in response"
 
-        # Validate score range
-        score = result.get("CardSummary", {}).get("MatchScore", 0)
-        score = max(0, min(100, int(score)))
-        result["CardSummary"]["MatchScore"] = score
+    if result is not None:
+        try:
+            score = result.get("CardSummary", {}).get("MatchScore", 0)
+            score = max(0, min(100, int(score)))
+            result["CardSummary"]["MatchScore"] = score
 
-        # Enforce decision thresholds
-        if score >= 75:
-            result["CardSummary"]["DecisionHint"] = "Apply"
-        elif score >= 60:
-            result["CardSummary"]["DecisionHint"] = "Maybe"
-        else:
-            result["CardSummary"]["DecisionHint"] = "Skip"
+            if score >= 75:
+                result["CardSummary"]["DecisionHint"] = "Apply"
+            elif score >= 60:
+                result["CardSummary"]["DecisionHint"] = "Maybe"
+            else:
+                result["CardSummary"]["DecisionHint"] = "Skip"
 
-        # Override: blockers force Skip regardless of score
-        blocking = result.get("CardSummary", {}).get("BlockingAlert", "")
-        if blocking:
-            result["CardSummary"]["DecisionHint"] = "Skip"
+            if result.get("CardSummary", {}).get("BlockingAlert"):
+                result["CardSummary"]["DecisionHint"] = "Skip"
 
-        return result
+            return result
+        except (KeyError, ValueError, TypeError) as e:
+            parse_error = f"structure: {str(e)[:80]}"
 
-    except (json.JSONDecodeError, KeyError) as e:
-        return {
-            "CardSummary": {
-                "MatchScore": 0, "DecisionHint": "Skip",
-                "TopLabel": "LLM parsing failed", "MainRisk": "Cannot evaluate",
-                "BlockingAlert": "",
-            },
-            "DecisionSignals": {"WorkMode": "Unknown", "SalaryText": "Unknown", "CommuteText": "Unknown", "LanguageText": "Unknown", "ApplyComplexity": "Unknown"},
-            "WhyFit": {"StrongMatch": [], "PartialMatch": []},
-            "Gaps": [], "Risks": [f"LLM parse error: {str(e)[:50]}"],
-            "PhygitalAssessment": {"Level": "Unknown", "Reason": ""},
-            "CompanySnapshot": {"Name": "", "Industry": "", "Size": None, "KM_Status": None, "IsAgency": False},
-            "ScoreBreakdown": {"PositiveDrivers": [], "NegativeDrivers": []},
-            "TrustNotes": {"Confidence": "Low", "MissingInfo": ["LLM response failed"], "FilterLogicReason": ""},
-            "_error": str(e),
-            "_raw": response[:300],
-        }
+    # --- Fallback: surface raw LLM text so the user can still judge fit ---
+    raw_preview = response.strip().replace("\n", " ")[:500]
+    print(f"    [LLM parse failed] {parse_error} — raw: {raw_preview[:200]}")
+    return {
+        "CardSummary": {
+            "MatchScore": 50,
+            "DecisionHint": "Maybe",
+            "TopLabel": raw_preview[:200] or "LLM returned empty",
+            "MainRisk": "JSON parse failed — review raw output",
+            "BlockingAlert": "",
+        },
+        "DecisionSignals": {"WorkMode": "Unknown", "SalaryText": "Unknown", "CommuteText": "Unknown", "LanguageText": "Unknown", "ApplyComplexity": "Unknown"},
+        "WhyFit": {"StrongMatch": [raw_preview[:150]] if raw_preview else [], "PartialMatch": []},
+        "Gaps": [], "Risks": [f"Parse error: {parse_error}"],
+        "PhygitalAssessment": {"Level": "Unknown", "Reason": ""},
+        "CompanySnapshot": {"Name": "", "Industry": "", "Size": None, "KM_Status": None, "IsAgency": False},
+        "ScoreBreakdown": {"PositiveDrivers": [], "NegativeDrivers": []},
+        "TrustNotes": {"Confidence": "Low", "MissingInfo": ["LLM response unparseable"], "FilterLogicReason": raw_preview[:300]},
+        "_error": parse_error,
+        "_raw": response[:1000],
+    }
 
 
 def score_all_jobs(df, profile=None, min_score=0):

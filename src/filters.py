@@ -147,7 +147,10 @@ DUTCH_TITLE_PATTERNS = re.compile(
     r"\b(medewerker|beheerder|adviseur|analist|ontwikkelaar|teamleider|"
     r"hoofd|directeur|beleids|coördinator|inkoop|verkoop|facilitair|"
     r"financieel|juridisch|technisch\s+specialist|projectleider|"
-    r"ondersteuner|kwaliteit|dienstverlening|stichting)\b",
+    r"ondersteuner|kwaliteit|dienstverlening|stichting|"
+    r"applicatie\w*|conversie\w*|bedrijfs\w*|"
+    r"onderzoeker|onderzoek|klant\w*|zorg\w*|"
+    r"schap|overheid|gemeente|ministerie|afdeling)\b",
     re.IGNORECASE,
 )
 
