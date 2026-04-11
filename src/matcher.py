@@ -85,8 +85,8 @@ def save_seen_job_ids(ids, path="output/seen_jobs.json"):
 
 SCORING_PROMPT = """### OUTPUT CONTRACT — READ FIRST
 Your entire response MUST be a single JSON object and NOTHING else.
-- First character: `{`
-- Last character: `}`
+- First character: `{{`
+- Last character: `}}`
 - No preamble. No "Let me think...". No markdown fences. No comments after.
 - If you violate this, the response is discarded.
 
@@ -156,6 +156,7 @@ Your job is to transform a job posting into a decision-ready, trustable, low-cog
    - Skip: < 60, or fit depends on too many assumptions
 
 ### REMINDER: Output ONLY the JSON object below. Start with `{{` and end with `}}`. No other text.
+
 
 {{
   "CardSummary": {{

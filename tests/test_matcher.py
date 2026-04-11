@@ -1,6 +1,22 @@
 import json
 
-from src.matcher import _extract_json
+from src.matcher import SCORING_PROMPT, _extract_json
+
+
+def test_scoring_prompt_formats_without_error():
+    """Regression: literal { / } in the prompt must be escaped as {{ / }}
+    so str.format() doesn't raise KeyError."""
+    formatted = SCORING_PROMPT.format(
+        title="Test", company="Test", location="Test", description="Test JD",
+        phygital_detected=False, pure_saas_detected=False,
+        driver_license_flagged=False, dutch_mandatory=False,
+        dutch_nice_to_have=False, work_mode="Remote", seniority_fit="Strong",
+        is_agency=False, km_visa_mentioned=False, feedback_context="None.",
+    )
+    assert len(formatted) > 1000
+    assert "OUTPUT CONTRACT" in formatted
+    # Literal { should appear in the rendered output (escaped source)
+    assert "`{`" in formatted
 
 
 def test_plain_json():
