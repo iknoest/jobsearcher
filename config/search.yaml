@@ -11,13 +11,13 @@ search_keywords:
   secondary:  # Good fit, slightly broader
     - "Product Innovation Engineer"
     - "Data Analyst"
-    - "Data Visualization"
+    - "Prototype Engineer"
     - "Technical Product Manager"
     - "Product Designer"
   exploratory:  # Worth seeing, might reveal unexpected fits
     - "Design Technologist"
     - "AI Product Manager"
-    - "IoT Product Manager"
+    - "Growth Engineer"
     - "Research Engineer"
     - "Strategy Consultant"
 
