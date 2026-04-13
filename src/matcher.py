@@ -155,6 +155,23 @@ Your job is to transform a job posting into a decision-ready, trustable, low-cog
    - Maybe: 60-74, good relevance but real uncertainty
    - Skip: < 60, or fit depends on too many assumptions
 
+8. WHYFIT MUST BE EMPLOYER-FACING — Each StrongMatch/PartialMatch item must answer: "Why would THIS employer shortlist Ava over a generic candidate for THIS specific role?"
+   FORBIDDEN in StrongMatch/PartialMatch:
+   - Generic seniority: "8 years experience", "senior level", "experienced researcher"
+   - Filter pass-through: "no Dutch required", "English OK", "located in NL", "no driving licence needed", "company is in Netherlands"
+   - Anything that applies equally to every candidate who passes the pre-filters
+   REQUIRED format: [JD-specific requirement] → [Ava's exact matching experience with context]
+   Example good: "JD要求大規模用戶研究 → Ava在BYD主導4000+人VOC研究，具備同等規模的設計研究能力"
+   Example bad: "具備8年以上工作經驗" or "不需要荷蘭語，符合Ava條件"
+
+9. GAPS MUST BE REAL AND JD-GROUNDED — Only list a gap if:
+   (a) the JD explicitly states a requirement or preferred skill, AND
+   (b) Ava clearly cannot meet it based on her profile
+   NEVER list Dutch language or driving licence as a gap unless the JD explicitly requires them.
+   NEVER invent gaps to fill the 3-item limit — use fewer items or an empty array if real gaps are fewer.
+   NEVER list "no experience in X" if X is not mentioned in the JD.
+   Each gap must name: the specific skill/domain the JD requires vs what Ava is missing.
+
 ### REMINDER: Output ONLY the JSON object below. Start with `{{` and end with `}}`. No other text.
 
 
@@ -164,7 +181,8 @@ Your job is to transform a job posting into a decision-ready, trustable, low-cog
     "DecisionHint": "Apply | Maybe | Skip",
     "TopLabel": "一句話總結，繁體中文，不超過25字",
     "MainRisk": "繁體中文，不超過20字，若無風險則空字串",
-    "BlockingAlert": "若有阻礙用⚠開頭，繁體中文，若無則空字串"
+    "BlockingAlert": "若有阻礙用⚠開頭，繁體中文，若無則空字串",
+    "RoleSummary": "1-2 English sentences: what this role does daily and what specific skills/tools/methods are used. Based ONLY on what the JD states — do not invent."
   }},
   "DecisionSignals": {{
     "WorkMode": "Remote | Hybrid | Onsite | Unknown",
@@ -174,11 +192,12 @@ Your job is to transform a job posting into a decision-ready, trustable, low-cog
     "ApplyComplexity": "Easy | Medium | Hard"
   }},
   "WhyFit": {{
-    "StrongMatch": ["繁體中文短句，最多3條"],
-    "PartialMatch": ["繁體中文短句，最多3條"]
+    "StrongMatch": ["繁體中文短句，最多3條。每條必須點名JD的具體要求+Ava對應的具體經歷（公司/工具/數字）。禁止寫通用資歷（如「8年經驗」）、禁止寫篩選邏輯（如「不需荷蘭語」「位於荷蘭」「無駕照要求」）。"],
+    "PartialMatch": ["繁體中文短句，最多3條。同上規則，僅代表部分符合。"]
   }},
-  "Gaps": ["繁體中文，具體缺口，最多3條"],
+  "Gaps": ["繁體中文，最多3條。僅列JD明確要求但Ava無法清楚符合的技能或領域。若JD未提及荷蘭語或駕照，禁止將其列為缺口。若無真實缺口則留空陣列。"],
   "Risks": ["繁體中文，結構性風險，最多3條"],
+  "KeySkills": ["5-8 key skills/tools/qualifications explicitly required by the JD. English. Short labels (e.g. 'Python', 'Agile/Scrum', '5+ yrs PM', 'SolidWorks'). No soft skills or generic terms."],
   "PhygitalAssessment": {{
     "Level": "Strong | Moderate | Weak",
     "Reason": "繁體中文，1-2句"

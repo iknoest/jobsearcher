@@ -82,6 +82,7 @@ EMAIL_TEMPLATE = """
   .sec-body li { margin-bottom: 1px; }
   .sec-body li.strong { font-weight: 500; }
   .sec-body li.partial { color: #515154; }
+  .role-summary { font-size: 12px; color: #515154; font-style: italic; margin: 0 0 8px; padding: 6px 8px; background: #f5f5f7; border-radius: 6px; line-height: 1.5; }
   .sec-body li.gap { color: #b36b00; }
   .sec-body li.risk { color: #c5221f; }
 
@@ -111,6 +112,13 @@ EMAIL_TEMPLATE = """
   .trust { font-size: 11px; color: #86868b; margin-top: 6px; }
   .trust .conf { font-weight: 600; }
   .trust .missing { font-style: italic; }
+
+  /* Skill chips */
+  .skill-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 2px; }
+  .skill-chip { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+  .skill-match { background: #e8f8ec; color: #1b7a2d; }
+  .skill-gap { background: #fce8e6; color: #c5221f; }
+  .skill-neutral { background: #f0f0f5; color: #515154; }
 
   /* Apply button */
   .apply-btn { display: inline-block; margin-top: 10px; padding: 7px 22px; background: #1d1d1f; color: #fff; border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; }
@@ -184,10 +192,19 @@ EMAIL_TEMPLATE = """
     {% if j.main_risk %}
     <div class="risk-line">{{ j.main_risk }}</div>
     {% endif %}
+
+    {% if j.key_skills %}
+    <div class="skill-chips">
+      {% for sk in j.key_skills %}<span class="skill-chip skill-neutral">{{ sk }}</span>{% endfor %}
+    </div>
+    {% endif %}
   </div>
 
   <!-- LAYER 2: Fast Explanation -->
   <div class="L2">
+    {% if j.role_summary %}
+    <div class="role-summary">{{ j.role_summary }}</div>
+    {% endif %}
     {% if j.strong_match or j.partial_match %}
     <div class="sec">
       <div class="sec-title">Why Fit</div>
@@ -312,18 +329,22 @@ def _parse_card(row):
         "commute": sig.get("CommuteText", f"~{row['travel_minutes']}min" if row.get("travel_minutes") else "Unknown"),
         "language": lang_text,
         "lang_class": lang_class,
-        "km_visa": row.get("km_visa_mentioned", False),
+        # Show KM Visa chip if company is on IND sponsor register OR if JD mentions it
+        "km_visa": row.get("km_visa_sponsor", False) or row.get("km_visa_mentioned", False),
         "is_agency": row.get("is_agency", False),
         "driver_flagged": row.get("driver_license_flagged", False),
         # Phygital
         "phygital_level": phy_level,
         "phygital_class": phy_class,
         "phygital_reason": phy.get("Reason", ""),
+        # Role summary (what this job actually does, in English)
+        "role_summary": card.get("RoleSummary", ""),
         # WhyFit
         "strong_match": fit.get("StrongMatch", []),
         "partial_match": fit.get("PartialMatch", []),
         "gaps": r.get("Gaps", []),
         "risks": r.get("Risks", []),
+        "key_skills": r.get("KeySkills", []),
         # Company
         "co_industry": co.get("Industry", ""),
         "co_size": co.get("Size"),
@@ -358,6 +379,102 @@ def build_email_html(df, filtered_count=0, keyword_stats=None):
         keyword_stats=keyword_stats or [],
         keywords_used=keywords,
     )
+
+
+PRERANK_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Jobsearcher Pre-rank Digest</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f7; color: #1d1d1f; padding: 16px; font-size: 13px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #86868b; font-size: 12px; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e5e5ea; vertical-align: top; }
+  th { background: #fafafa; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #86868b; }
+  tr:last-child td { border-bottom: none; }
+  .score { font-weight: 700; font-size: 15px; width: 50px; text-align: center; }
+  .score.pos { color: #1b7a2d; }
+  .score.neu { color: #86868b; }
+  .score.neg { color: #c5221f; }
+  .title a { color: #0066cc; text-decoration: none; font-weight: 600; }
+  .title a:hover { text-decoration: underline; }
+  .company { color: #515154; font-size: 12px; }
+  .reasons { color: #86868b; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+  .meta { color: #515154; font-size: 11px; }
+  .footer { text-align: center; color: #86868b; font-size: 11px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Jobsearcher · Pre-rank Digest</h1>
+<div class="sub">{{ total }} jobs ranked · no LLM scoring · {{ generated_at }}</div>
+<table>
+<thead><tr><th>Rank</th><th>Job</th><th>Work / Salary</th><th>Signals</th></tr></thead>
+<tbody>
+{% for j in jobs %}
+<tr>
+  <td class="score {{ j.cls }}">{{ j.score }}</td>
+  <td>
+    <div class="title"><a href="{{ j.url }}" target="_blank">{{ j.title }}</a></div>
+    <div class="company">{{ j.company }} · {{ j.location }}</div>
+    <div class="reasons">{{ j.reasons }}</div>
+  </td>
+  <td class="meta">{{ j.work_mode }}<br>{{ j.salary }}</td>
+  <td class="meta">
+    {% if j.phygital %}Phygital · {% endif %}
+    {% if j.pure_saas %}Pure SaaS · {% endif %}
+    {% if j.driver %}Driver licence · {% endif %}
+    {% if j.dutch_nth %}Dutch preferred{% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<div class="footer">Edit weights in <code>config/prerank.yaml</code> · No LLM quota spent on this digest</div>
+</div>
+</body>
+</html>
+"""
+
+
+def build_prerank_digest(df, output_dir="output"):
+    """Render a pre-rank-only digest. No LLM fields, no match_result required."""
+    jobs = []
+    for _, row in df.iterrows():
+        score = int(row.get("prerank_score", 0))
+        cls = "pos" if score > 0 else ("neg" if score < 0 else "neu")
+        jobs.append({
+            "score": f"{score:+d}" if score else "0",
+            "cls": cls,
+            "title": str(row.get("title", "?"))[:90],
+            "company": str(row.get("company", "?"))[:60],
+            "location": str(row.get("location", ""))[:40],
+            "url": str(row.get("job_url", "#")),
+            "reasons": str(row.get("prerank_reasons", "")),
+            "work_mode": str(row.get("work_mode", "Unknown")),
+            "salary": str(row.get("salary_info", "")) or "Unknown",
+            "phygital": bool(row.get("phygital_detected", False)),
+            "pure_saas": bool(row.get("pure_saas_detected", False)),
+            "driver": bool(row.get("driver_license_flagged", False)),
+            "dutch_nth": bool(row.get("dutch_nice_to_have", False)),
+        })
+
+    template = Template(PRERANK_TEMPLATE)
+    html = template.render(
+        jobs=jobs,
+        total=len(jobs),
+        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+    )
+
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = f"{output_dir}/prerank_digest_{datetime.now().strftime('%Y%m%d_%H%M')}.html"
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"Saved pre-rank digest: {output_path}")
+    return output_path
 
 
 def send_email(df, subject=None, filtered_count=0, keyword_stats=None):
