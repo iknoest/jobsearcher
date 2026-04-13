@@ -19,6 +19,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import re as _re
+import urllib.parse as _urlparse
+
+def _job_id_from_url(url):
+    """Extract a short job ID from a job URL.
+    LinkedIn: https://www.linkedin.com/jobs/view/4400368636 -> '4400368636'
+    Other: URL-safe hash.
+    """
+    m = _re.search(r"/jobs/view/(\d+)", str(url))
+    if m:
+        return m.group(1)
+    return _urlparse.quote(str(url), safe="")
+
 EMAIL_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -120,8 +133,12 @@ EMAIL_TEMPLATE = """
   .skill-gap { background: #fce8e6; color: #c5221f; }
   .skill-neutral { background: #f0f0f5; color: #515154; }
 
-  /* Apply button */
-  .apply-btn { display: inline-block; margin-top: 10px; padding: 7px 22px; background: #1d1d1f; color: #fff; border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; }
+  /* Action buttons */
+  .action-btns { display: flex; gap: 8px; margin-top: 10px; }
+  .btn { display: inline-block; padding: 7px 18px; border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; text-align: center; }
+  .btn-view { background: #f0f0f5; color: #1d1d1f; }
+  .btn-apply { background: #34c759; color: #fff; }
+  .btn-skip { background: #f0f0f5; color: #86868b; }
 
   /* No matches */
   .empty { text-align: center; padding: 40px 20px; color: #86868b; }
@@ -266,7 +283,11 @@ EMAIL_TEMPLATE = """
       {% if j.missing_info %}<span class="missing"> · Missing: {{ j.missing_info | join(', ') }}</span>{% endif %}
     </div>
 
-    <a href="{{ j.job_url }}" class="apply-btn">View &amp; Apply</a>
+    <div class="action-btns">
+      <a href="{{ j.job_url }}" class="btn btn-view">View</a>
+      <a href="http://localhost:5000/tailor/{{ j.job_id }}" class="btn btn-apply">Apply</a>
+      <a href="http://localhost:5000/skip/{{ j.job_id }}" class="btn btn-skip">Skip</a>
+    </div>
   </div>
 </div>
 {% endfor %}
@@ -316,6 +337,7 @@ def _parse_card(row):
         "company": row.get("company", ""),
         "industry": co.get("Industry", ""),
         "job_url": row.get("job_url", "#"),
+        "job_id": _job_id_from_url(row.get("job_url", "")),
         "score": score,
         "hint": hint,
         "decision_class": hint.lower(),
