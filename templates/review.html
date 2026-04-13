@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Review — {{ title }} @ {{ company }}</title>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset + base                                                         */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+      --font-mono: "SF Mono", ui-monospace, "Cascadia Code", monospace;
+
+      /* Palette */
+      --bg-app:       #f0f0f0;
+      --bg-panel:     #ffffff;
+      --bg-ref:       #f7f7f5;          /* left read-only panel */
+      --bg-edit:      #fffde7;          /* editing state highlight */
+      --bg-bar:       #1c1c1e;          /* fixed bottom bar */
+
+      --border:       #e2e2e2;
+      --border-focus: #0a84ff;
+
+      --text-primary:   #1c1c1e;
+      --text-secondary: #6e6e73;
+      --text-muted:     #8e8e93;
+      --text-inv:       #f5f5f7;
+
+      --accent:       #0a84ff;
+      --accent-hover: #006edc;
+
+      --chip-match:   #34c759;
+      --chip-match-bg:#e8f8ee;
+      --chip-gap:     #ff3b30;
+      --chip-gap-bg:  #fff0ef;
+      --chip-neutral: #8e8e93;
+      --chip-neutral-bg: #f2f2f7;
+
+      --radius:    10px;
+      --radius-sm:  6px;
+      --radius-xs:  4px;
+      --shadow:    0 1px 4px rgba(0,0,0,.08), 0 2px 12px rgba(0,0,0,.06);
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.06);
+
+      --bar-h: 60px;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: var(--font);
+      font-size: 14px;
+      color: var(--text-primary);
+      background: var(--bg-app);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Page header                                                          */
+    /* ------------------------------------------------------------------ */
+    .page-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg-bar);
+      color: var(--text-inv);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 24px;
+      height: 48px;
+      border-bottom: 1px solid #2c2c2e;
+    }
+
+    .page-header .job-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -.01em;
+    }
+
+    .page-header .job-company {
+      font-size: 13px;
+      color: #98989d;
+    }
+
+    .page-header .sep { color: #48484a; }
+
+    .page-header .score-badge {
+      margin-left: auto;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      background: #2c2c2e;
+      color: var(--text-inv);
+    }
+
+    .page-header .score-badge.apply  { background: #1a3e1e; color: #32d74b; }
+    .page-header .score-badge.maybe  { background: #3a2e14; color: #ffd60a; }
+    .page-header .score-badge.skip   { background: #3a1515; color: #ff453a; }
+
+    /* ------------------------------------------------------------------ */
+    /* Three-panel layout                                                   */
+    /* ------------------------------------------------------------------ */
+    .panels {
+      display: flex;
+      flex-direction: row;
+      min-width: 1200px;
+      height: calc(100vh - 48px - var(--bar-h));
+      overflow: hidden;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-right: 1px solid var(--border);
+    }
+
+    .panel:last-child { border-right: none; }
+
+    .panel--ref  { width: 25%; background: var(--bg-ref); }
+    .panel--cv   { width: 45%; background: var(--bg-panel); }
+    .panel--cl   { width: 30%; background: var(--bg-panel); }
+
+    .panel-header {
+      padding: 14px 18px 10px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .panel-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 18px;
+      padding-bottom: 24px;
+    }
+
+    .panel-body::-webkit-scrollbar { width: 6px; }
+    .panel-body::-webkit-scrollbar-track { background: transparent; }
+    .panel-body::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Section card (shared across CV + CL panels)                         */
+    /* ------------------------------------------------------------------ */
+    .section-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 10px;
+      overflow: hidden;
+      transition: box-shadow .15s ease;
+    }
+
+    .panel--ref .section-card {
+      background: var(--bg-ref);
+      box-shadow: none;
+    }
+
+    .section-card:hover { box-shadow: var(--shadow); }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      padding: 9px 14px 8px;
+      border-bottom: 1px solid var(--border);
+      gap: 6px;
+    }
+
+    .card-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+      flex: 1;
+    }
+
+    .card-label .sub-label {
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .card-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    .btn-icon {
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      background: transparent;
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--text-secondary);
+      transition: background .12s, color .12s, border-color .12s;
+      flex-shrink: 0;
+    }
+
+    .btn-icon:hover {
+      background: var(--bg-app);
+      border-color: #c0c0c0;
+      color: var(--text-primary);
+    }
+
+    .btn-icon.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .card-body {
+      padding: 12px 14px;
+    }
+
+    /* Editable region */
+    .editable {
+      outline: none;
+      border-radius: var(--radius-xs);
+      min-height: 20px;
+      line-height: 1.6;
+      transition: background .15s, box-shadow .15s;
+      word-break: break-word;
+    }
+
+    .editable[contenteditable="true"] {
+      background: var(--bg-edit);
+      box-shadow: 0 0 0 2px var(--border-focus);
+      padding: 2px 4px;
+      margin: -2px -4px;
+    }
+
+    /* Bullet list */
+    .bullet-list {
+      list-style: disc;
+      padding-left: 18px;
+      margin: 0;
+    }
+
+    .bullet-list li {
+      line-height: 1.6;
+      margin-bottom: 3px;
+      font-size: 13.5px;
+    }
+
+    .bullet-list li:last-child { margin-bottom: 0; }
+
+    /* Skills grid */
+    .skills-grid { display: flex; flex-direction: column; gap: 8px; }
+
+    .skill-cat-name {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .skill-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .skill-tag {
+      font-size: 12px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      background: var(--chip-neutral-bg);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+
+    /* Inline save indicator */
+    .save-indicator {
+      font-size: 11px;
+      color: var(--chip-match);
+      opacity: 0;
+      transition: opacity .2s;
+      white-space: nowrap;
+    }
+
+    .save-indicator.visible { opacity: 1; }
+
+    /* Inline spinner */
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Regen popover */
+    .regen-row {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-top: 1px solid var(--border);
+      background: #fafafa;
+    }
+
+    .regen-row.open { display: flex; }
+
+    .regen-input {
+      flex: 1;
+      font-family: var(--font);
+      font-size: 12.5px;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      outline: none;
+      background: var(--bg-panel);
+      transition: border-color .12s;
+    }
+
+    .regen-input:focus { border-color: var(--border-focus); }
+
+    .regen-input::placeholder { color: var(--text-muted); }
+
+    .btn-regen-go {
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      transition: background .12s;
+      white-space: nowrap;
+    }
+
+    .btn-regen-go:hover { background: var(--accent-hover); }
+
+    /* ------------------------------------------------------------------ */
+    /* Left panel — reference info                                          */
+    /* ------------------------------------------------------------------ */
+    .ref-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+
+    .ref-meta-item {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .ref-meta-item strong { color: var(--text-primary); font-weight: 600; }
+
+    .ref-section-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 14px 0 6px;
+    }
+
+    /* Skill chips on left panel */
+    .kskill-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-bottom: 6px;
+    }
+
+    .kskill-chip {
+      font-size: 11.5px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-weight: 500;
+    }
+
+    .kskill-chip.match {
+      background: var(--chip-match-bg);
+      color: #1e7e34;
+      border: 1px solid #b7e8c0;
+    }
+
+    .kskill-chip.gap {
+      background: var(--chip-gap-bg);
+      color: #c0392b;
+      border: 1px solid #ffc1bd;
+    }
+
+    .kskill-chip.neutral {
+      background: var(--chip-neutral-bg);
+      color: var(--chip-neutral);
+      border: 1px solid var(--border);
+    }
+
+    /* WhyFit / Gaps lists */
+    .fit-list { list-style: none; padding: 0; margin: 0; }
+
+    .fit-list li {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      line-height: 1.55;
+      padding: 3px 0 3px 16px;
+      position: relative;
+    }
+
+    .fit-list li::before {
+      content: attr(data-icon);
+      position: absolute;
+      left: 0;
+      top: 3px;
+      font-size: 11px;
+    }
+
+    .fit-list li.strong::before { content: "✦"; color: var(--chip-match); }
+    .fit-list li.partial::before { content: "◉"; color: #f0a500; }
+    .fit-list li.gap::before { content: "△"; color: var(--chip-gap); }
+
+    /* JD preview */
+    .jd-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.65;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      background: var(--bg-panel);
+    }
+
+    /* Role entry in CV panel */
+    .role-header {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      margin-bottom: 6px;
+    }
+
+    .role-title-line {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .role-meta-line {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .role-desc-line {
+      font-size: 12px;
+      font-style: italic;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    /* Experience wrapper — shows multiple companies, one card each */
+    .exp-cards { display: flex; flex-direction: column; gap: 10px; }
+
+    /* ------------------------------------------------------------------ */
+    /* Fixed export bar                                                     */
+    /* ------------------------------------------------------------------ */
+    .export-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: var(--bar-h);
+      background: var(--bg-bar);
+      border-top: 1px solid #2c2c2e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      z-index: 200;
+    }
+
+    .btn-export {
+      font-family: var(--font);
+      font-size: 13.5px;
+      font-weight: 500;
+      padding: 9px 22px;
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background .12s, transform .08s;
+    }
+
+    .btn-export:active { transform: scale(.97); }
+
+    .btn-export--cv {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-export--cv:hover { background: var(--accent-hover); }
+
+    .btn-export--cl {
+      background: #3a3a3c;
+      color: var(--text-inv);
+    }
+
+    .btn-export--cl:hover { background: #4a4a4c; }
+
+    /* ------------------------------------------------------------------ */
+    /* Utility / helpers                                                    */
+    /* ------------------------------------------------------------------ */
+    .text-sm { font-size: 12.5px; line-height: 1.6; }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 10px 0;
+    }
+
+    /* Error toast */
+    .toast {
+      position: fixed;
+      top: 60px;
+      right: 20px;
+      background: #3a1515;
+      color: #ff6b6b;
+      font-size: 13px;
+      padding: 10px 16px;
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s;
+      z-index: 300;
+    }
+
+    .toast.visible { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!-- Page header                                                        -->
+<!-- ================================================================ -->
+<header class="page-header">
+  <span class="job-title">{{ title }}</span>
+  <span class="sep">@</span>
+  <span class="job-company">{{ company }}</span>
+
+  {% set score = match_result.get("CardSummary", {}).get("MatchScore", "") %}
+  {% set decision = match_result.get("CardSummary", {}).get("DecisionHint", "") %}
+  {% if score %}
+    {% if decision and "apply" in decision.lower() %}
+      <span class="score-badge apply">Apply · {{ score }}</span>
+    {% elif decision and "maybe" in decision.lower() %}
+      <span class="score-badge maybe">Maybe · {{ score }}</span>
+    {% else %}
+      <span class="score-badge skip">{{ score }}</span>
+    {% endif %}
+  {% endif %}
+</header>
+
+<!-- ================================================================ -->
+<!-- Three panels                                                       -->
+<!-- ================================================================ -->
+<div class="panels">
+
+  <!-- ============================================================== -->
+  <!-- PANEL 1 — Job info (read-only reference)                        -->
+  <!-- ============================================================== -->
+  <div class="panel panel--ref">
+    <div class="panel-header">
+      <div class="panel-label">Job Reference</div>
+    </div>
+    <div class="panel-body">
+
+      <!-- Meta -->
+      <div class="ref-meta">
+        <div class="ref-meta-item"><strong>{{ title }}</strong></div>
+        <div class="ref-meta-item">{{ company }}</div>
+        {% if match_result.get("CardSummary", {}).get("RoleSummary") %}
+        <div class="ref-meta-item text-sm" style="margin-top:4px; color:var(--text-muted);">
+          {{ match_result.CardSummary.RoleSummary }}
+        </div>
+        {% endif %}
+        {% if match_result.get("CardSummary", {}).get("MatchScore") %}
+        <div class="ref-meta-item" style="margin-top:6px;">
+          Score: <strong>{{ match_result.CardSummary.MatchScore }}</strong>
+          {% if match_result.CardSummary.get("DecisionHint") %}
+          &nbsp;·&nbsp; {{ match_result.CardSummary.DecisionHint }}
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Key Skills chips -->
+      {% set key_skills = match_result.get("KeySkills", []) %}
+      {% set strong_matches = match_result.get("WhyFit", {}).get("StrongMatch", []) %}
+      {% if key_skills %}
+      <div class="ref-section-label">Key Skills</div>
+      <div class="kskill-chips">
+        {% for skill in key_skills %}
+          {%- set is_match = false %}
+          {%- for sm in strong_matches %}
+            {%- if skill.lower() in sm.lower() or sm.lower() in skill.lower() %}
+              {%- set is_match = true %}
+            {%- endif %}
+          {%- endfor %}
+          {%- set gaps = match_result.get("Gaps", []) %}
+          {%- set is_gap = false %}
+          {%- for g in gaps %}
+            {%- if skill.lower() in g.lower() or g.lower() in skill.lower() %}
+              {%- set is_gap = true %}
+            {%- endif %}
+          {%- endfor %}
+          {% if is_match %}
+            <span class="kskill-chip match">{{ skill }}</span>
+          {% elif is_gap %}
+            <span class="kskill-chip gap">{{ skill }}</span>
+          {% else %}
+            <span class="kskill-chip neutral">{{ skill }}</span>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Why Fit -->
+      {% set why_fit = match_result.get("WhyFit", {}) %}
+      {% if why_fit.get("StrongMatch") or why_fit.get("PartialMatch") %}
+      <div class="ref-section-label">Why Fit</div>
+      <ul class="fit-list">
+        {% for item in why_fit.get("StrongMatch", []) %}
+        <li class="strong">{{ item }}</li>
+        {% endfor %}
+        {% for item in why_fit.get("PartialMatch", []) %}
+        <li class="partial">{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+
+      <!-- Gaps -->
+      {% if match_result.get("Gaps") %}
+      <div class="ref-section-label" style="color:var(--chip-gap);opacity:.8;">Gaps</div>
+      <ul class="fit-list">
+        {% for gap in match_result.Gaps %}
+        <li class="gap">{{ gap }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+
+      <!-- JD preview -->
+      {% if jd_text %}
+      <div class="ref-section-label">Job Description</div>
+      <div class="jd-text">{{ jd_text[:3000] }}{% if jd_text|length > 3000 %}…{% endif %}</div>
+      {% endif %}
+
+    </div><!-- /panel-body -->
+  </div><!-- /panel--ref -->
+
+
+  <!-- ============================================================== -->
+  <!-- PANEL 2 — Tailored CV                                           -->
+  <!-- ============================================================== -->
+  <div class="panel panel--cv">
+    <div class="panel-header">
+      <div class="panel-label">Tailored CV Draft</div>
+    </div>
+    <div class="panel-body">
+
+      <!-- Headline -->
+      <div class="section-card" id="card-headline">
+        <div class="card-header">
+          <span class="card-label">Headline</span>
+          <div class="card-actions">
+            <span class="save-indicator" id="si-headline"></span>
+            <button class="btn-icon" title="Edit" onclick="startEdit('headline')">&#9998;</button>
+            <button class="btn-icon" title="Regenerate" onclick="toggleRegen('headline')">&#8635;</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="editable text-sm" id="ed-headline"
+               data-section="headline"
+               data-job-id="{{ job_id }}"
+               onblur="saveSection(this)">{{ draft.headline }}</div>
+        </div>
+        <div class="regen-row" id="regen-headline">
+          <input class="regen-input" id="ri-headline" placeholder="Optional instruction…" onkeydown="regenKeydown(event, 'headline')" />
+          <button class="btn-regen-go" onclick="submitRegen('headline')">Regenerate</button>
+          <span class="spinner" id="sp-headline" style="display:none;"></span>
+        </div>
+      </div>
+
+      <!-- Summary -->
+      <div class="section-card" id="card-summary">
+        <div class="card-header">
+          <span class="card-label">Summary</span>
+          <div class="card-actions">
+            <span class="save-indicator" id="si-summary"></span>
+            <button class="btn-icon" title="Edit" onclick="startEdit('summary')">&#9998;</button>
+            <button class="btn-icon" title="Regenerate" onclick="toggleRegen('summary')">&#8635;</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="editable text-sm" id="ed-summary"
+               data-section="summary"
+               data-job-id="{{ job_id }}"
+               onblur="saveSection(this)">{{ draft.summary }}</div>
+        </div>
+        <div class="regen-row" id="regen-summary">
+          <input class="regen-input" id="ri-summary" placeholder="Optional instruction…" onkeydown="regenKeydown(event, 'summary')" />
+          <button class="btn-regen-go" onclick="submitRegen('summary')">Regenerate</button>
+          <span class="spinner" id="sp-summary" style="display:none;"></span>
+        </div>
+      </div>
+
+      <!-- Experience (one card per role) -->
+      <div class="exp-cards" id="exp-cards">
+        {% for role in draft.experience %}
+        {% set i = loop.index0 %}
+        <div class="section-card" id="card-exp-{{ i }}">
+          <div class="card-header">
+            <span class="card-label">
+              {{ role.company }}
+              <span class="sub-label">&nbsp;/&nbsp;{{ role.title }}</span>
+            </span>
+            <div class="card-actions">
+              <span class="save-indicator" id="si-exp-{{ i }}"></span>
+              <button class="btn-icon" title="Edit bullets" onclick="startEditBullets({{ i }})">&#9998;</button>
+              <button class="btn-icon" title="Regenerate" onclick="toggleRegen('exp-{{ i }}')">&#8635;</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="role-header">
+              <div class="role-title-line">{{ role.title }}</div>
+              <div class="role-meta-line">{{ role.period }}{% if role.location %} &nbsp;|&nbsp; {{ role.location }}{% endif %}</div>
+              {% if role.company_desc %}
+              <div class="role-desc-line">{{ role.company_desc }}</div>
+              {% endif %}
+            </div>
+            <ul class="bullet-list editable-bullets" id="bl-{{ i }}"
+                data-index="{{ i }}"
+                data-job-id="{{ job_id }}">
+              {% for bullet in role.bullets %}
+              <li contenteditable="false"
+                  onblur="saveBullets({{ i }})"
+                  class="editable">{{ bullet }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div class="regen-row" id="regen-exp-{{ i }}">
+            <input class="regen-input" id="ri-exp-{{ i }}" placeholder="Optional instruction…"
+                   onkeydown="regenKeydown(event, 'exp-{{ i }}')" />
+            <button class="btn-regen-go" onclick="submitRegen('exp-{{ i }}')">Regenerate</button>
+            <span class="spinner" id="sp-exp-{{ i }}" style="display:none;"></span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- Skills -->
+      <div class="section-card" id="card-skills">
+        <div class="card-header">
+          <span class="card-label">Skills</span>
+          <div class="card-actions">
+            <span class="save-indicator" id="si-skills"></span>
+            <button class="btn-icon" title="Regenerate" onclick="toggleRegen('skills')">&#8635;</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="skills-grid" id="skills-grid">
+            {% for cat, skill_list in draft.skills.items() %}
+            <div class="skills-cat-block" data-cat="{{ cat }}">
+              <div class="skill-cat-name">{{ cat }}</div>
+              <div class="skill-tags" data-cat="{{ cat }}">
+                {% for skill in skill_list %}
+                <span class="skill-tag">{{ skill }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="regen-row" id="regen-skills">
+          <input class="regen-input" id="ri-skills" placeholder="Optional instruction…" onkeydown="regenKeydown(event, 'skills')" />
+          <button class="btn-regen-go" onclick="submitRegen('skills')">Regenerate</button>
+          <span class="spinner" id="sp-skills" style="display:none;"></span>
+        </div>
+      </div>
+
+    </div><!-- /panel-body -->
+  </div><!-- /panel--cv -->
+
+
+  <!-- ============================================================== -->
+  <!-- PANEL 3 — Cover Letter                                          -->
+  <!-- ============================================================== -->
+  <div class="panel panel--cl">
+    <div class="panel-header">
+      <div class="panel-label">Cover Letter</div>
+    </div>
+    <div class="panel-body">
+
+      {% set cl = draft.cover_letter %}
+
+      <!-- Opening -->
+      <div class="section-card" id="card-cl-opening">
+        <div class="card-header">
+          <span class="card-label">Opening</span>
+          <div class="card-actions">
+            <span class="save-indicator" id="si-cl-opening"></span>
+            <button class="btn-icon" title="Edit" onclick="startEdit('cl-opening')">&#9998;</button>
+            <button class="btn-icon" title="Regenerate" onclick="toggleRegen('cl-opening')">&#8635;</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="editable text-sm" id="ed-cl-opening"
+               data-section="cover_letter.opening"
+               data-job-id="{{ job_id }}"
+               onblur="saveSection(this)">{{ cl.opening }}</div>
+        </div>
+        <div class="regen-row" id="regen-cl-opening">
+          <input class="regen-input" id="ri-cl-opening" placeholder="Optional instruction…"
+                 onkeydown="regenKeydown(event, 'cl-opening')" />
+          <button class="btn-regen-go" onclick="submitRegen('cl-opening')">Regenerate</button>
+          <span class="spinner" id="sp-cl-opening" style="display:none;"></span>
+        </div>
+      </div>
+
+      <!-- Experience paragraph -->
+      <div class="section-card" id="card-cl-experience">
+        <div class="card-header">
+          <span class="card-label">Experience</span>
+          <div class="card-actions">
+            <span class="save-indicator" id="si-cl-experience"></span>
+            <button class="btn-icon" title="Edit" onclick="startEdit('cl-experience')">&#9998;</button>
+            <button class="btn-icon" title="Regenerate" onclick="toggleRegen('cl-experience')">&#8635;</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="editable text-sm" id="ed-cl-experience"
+               data-section="cover_letter.experience_paragraph"
+               data-job-id="{{ job_id }}"
+               onblur="saveSection(this)">{{ cl.experience_paragraph }}</div>
+        </div>
+        <div class="regen-row" id="regen-cl-experience">
+          <input class="regen-input" id="ri-cl-experience" placeholder="Optional instruction…"
+                 onkeydown="regenKeydown(event, 'cl-experience')" />
+          <button class="btn-regen-go" onclick="submitRegen('cl-experience')">Regenerate</button>
+          <span class="spinner" id="sp-cl-experience" style="display:none;"></span>
+        </div>
+      </div>
+
+      <!-- Skills paragraph -->
+      <div class="section-card" id="card-cl-skills">
+        <div class="card-header">
+          <span class="card-label">Skills</span>
+          <div class="card-actions">
+            <span class="save-indicator" id="si-cl-skills"></span>
+            <button class="btn-icon" title="Edit" onclick="startEdit('cl-skills')">&#9998;</button>
+            <button class="btn-icon" title="Regenerate" onclick="toggleRegen('cl-skills')">&#8635;</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="editable text-sm" id="ed-cl-skills"
+               data-section="cover_letter.skills_paragraph"
+               data-job-id="{{ job_id }}"
+               onblur="saveSection(this)">{{ cl.skills_paragraph }}</div>
+        </div>
+        <div class="regen-row" id="regen-cl-skills">
+          <input class="regen-input" id="ri-cl-skills" placeholder="Optional instruction…"
+                 onkeydown="regenKeydown(event, 'cl-skills')" />
+          <button class="btn-regen-go" onclick="submitRegen('cl-skills')">Regenerate</button>
+          <span class="spinner" id="sp-cl-skills" style="display:none;"></span>
+        </div>
+      </div>
+
+      <!-- Closing -->
+      <div class="section-card" id="card-cl-closing">
+        <div class="card-header">
+          <span class="card-label">Closing</span>
+          <div class="card-actions">
+            <span class="save-indicator" id="si-cl-closing"></span>
+            <button class="btn-icon" title="Edit" onclick="startEdit('cl-closing')">&#9998;</button>
+            <button class="btn-icon" title="Regenerate" onclick="toggleRegen('cl-closing')">&#8635;</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="editable text-sm" id="ed-cl-closing"
+               data-section="cover_letter.closing"
+               data-job-id="{{ job_id }}"
+               onblur="saveSection(this)">{{ cl.closing }}</div>
+        </div>
+        <div class="regen-row" id="regen-cl-closing">
+          <input class="regen-input" id="ri-cl-closing" placeholder="Optional instruction…"
+                 onkeydown="regenKeydown(event, 'cl-closing')" />
+          <button class="btn-regen-go" onclick="submitRegen('cl-closing')">Regenerate</button>
+          <span class="spinner" id="sp-cl-closing" style="display:none;"></span>
+        </div>
+      </div>
+
+    </div><!-- /panel-body -->
+  </div><!-- /panel--cl -->
+
+</div><!-- /panels -->
+
+
+<!-- ================================================================ -->
+<!-- Fixed export bar                                                   -->
+<!-- ================================================================ -->
+<div class="export-bar">
+  <button class="btn-export btn-export--cv"
+          onclick="window.location='/api/export/cv/{{ job_id }}'">
+    Export CV as PDF
+  </button>
+  <button class="btn-export btn-export--cl"
+          onclick="window.location='/api/export/cl/{{ job_id }}'">
+    Export Cover Letter as PDF
+  </button>
+</div>
+
+<!-- Error toast -->
+<div class="toast" id="toast"></div>
+
+
+<!-- ================================================================ -->
+<!-- JavaScript                                                         -->
+<!-- ================================================================ -->
+<script>
+  const JOB_ID = "{{ job_id }}";
+
+  // ----------------------------------------------------------------
+  // Utility: show toast error
+  // ----------------------------------------------------------------
+  function showToast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("visible");
+    setTimeout(() => t.classList.remove("visible"), 3500);
+  }
+
+  // ----------------------------------------------------------------
+  // showSaved — brief "Saved ✓" indicator
+  // ----------------------------------------------------------------
+  function showSaved(key) {
+    const el = document.getElementById("si-" + key);
+    if (!el) return;
+    el.textContent = "Saved \u2713";
+    el.classList.add("visible");
+    setTimeout(() => {
+      el.textContent = "";
+      el.classList.remove("visible");
+    }, 2000);
+  }
+
+  // ----------------------------------------------------------------
+  // startEdit — make a simple editable div editable
+  // ----------------------------------------------------------------
+  function startEdit(key) {
+    const el = document.getElementById("ed-" + key);
+    if (!el) return;
+    el.contentEditable = "true";
+    el.focus();
+    // Move cursor to end
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // ----------------------------------------------------------------
+  // saveSection — called on blur of a simple .editable div
+  // ----------------------------------------------------------------
+  function saveSection(el) {
+    if (el.contentEditable !== "true") return;
+    el.contentEditable = "false";
+
+    const section = el.dataset.section;
+    const jobId   = el.dataset.jobId || JOB_ID;
+    const content = el.innerText.trim();
+    // Derive indicator key from element id: "ed-X" → "X"
+    const key = el.id.replace(/^ed-/, "");
+
+    fetch("/api/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: jobId, section: section, content: content }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          showSaved(key);
+        } else {
+          showToast("Save failed: " + (data.error || "unknown error"));
+        }
+      })
+      .catch(err => showToast("Save error: " + err));
+  }
+
+  // ----------------------------------------------------------------
+  // startEditBullets — make bullet <li> items editable
+  // ----------------------------------------------------------------
+  function startEditBullets(idx) {
+    const ul = document.getElementById("bl-" + idx);
+    if (!ul) return;
+    ul.querySelectorAll("li").forEach(li => {
+      li.contentEditable = "true";
+      li.style.outline = "none";
+    });
+    const first = ul.querySelector("li");
+    if (first) first.focus();
+  }
+
+  // ----------------------------------------------------------------
+  // saveBullets — collect all <li> text and POST
+  // ----------------------------------------------------------------
+  function saveBullets(idx) {
+    const ul = document.getElementById("bl-" + idx);
+    if (!ul) return;
+
+    // Only fire save when ALL li items lose focus (debounce)
+    clearTimeout(ul._saveTimer);
+    ul._saveTimer = setTimeout(() => {
+      const bullets = Array.from(ul.querySelectorAll("li")).map(li => li.innerText.trim());
+      ul.querySelectorAll("li").forEach(li => { li.contentEditable = "false"; });
+
+      fetch("/api/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job_id: JOB_ID,
+          section: "experience." + idx + ".bullets",
+          content: bullets,
+        }),
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.ok) {
+            showSaved("exp-" + idx);
+          } else {
+            showToast("Save failed: " + (data.error || "unknown"));
+          }
+        })
+        .catch(err => showToast("Save error: " + err));
+    }, 200);
+  }
+
+  // ----------------------------------------------------------------
+  // toggleRegen — show / hide the regenerate row
+  // ----------------------------------------------------------------
+  function toggleRegen(key) {
+    const row = document.getElementById("regen-" + key);
+    if (!row) return;
+    const isOpen = row.classList.toggle("open");
+    if (isOpen) {
+      const inp = document.getElementById("ri-" + key);
+      if (inp) inp.focus();
+    }
+  }
+
+  function regenKeydown(evt, key) {
+    if (evt.key === "Enter") submitRegen(key);
+    if (evt.key === "Escape") toggleRegen(key);
+  }
+
+  // ----------------------------------------------------------------
+  // submitRegen — call /api/regenerate and update DOM
+  // ----------------------------------------------------------------
+  function submitRegen(key) {
+    const inp     = document.getElementById("ri-" + key);
+    const spinner = document.getElementById("sp-" + key);
+    const instruction = inp ? inp.value.trim() : "";
+
+    // Map key → API section path
+    const sectionMap = {
+      "headline":      "headline",
+      "summary":       "summary",
+      "skills":        "skills",
+      "cl-opening":    "cover_letter.opening",
+      "cl-experience": "cover_letter.experience_paragraph",
+      "cl-skills":     "cover_letter.skills_paragraph",
+      "cl-closing":    "cover_letter.closing",
+    };
+
+    // Experience bullets: key is "exp-N"
+    let section = sectionMap[key];
+    if (!section && key.startsWith("exp-")) {
+      const idx = key.replace("exp-", "");
+      section = "experience." + idx + ".bullets";
+    }
+
+    if (!section) {
+      showToast("Unknown section: " + key);
+      return;
+    }
+
+    if (spinner) spinner.style.display = "inline-block";
+    if (inp) inp.disabled = true;
+
+    fetch("/api/regenerate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: JOB_ID, section: section, instruction: instruction }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (spinner) spinner.style.display = "none";
+        if (inp) inp.disabled = false;
+
+        if (data.error) {
+          showToast("Regen failed: " + data.error);
+          return;
+        }
+
+        updateSectionDOM(key, data.content);
+
+        // Close regen row
+        const row = document.getElementById("regen-" + key);
+        if (row) row.classList.remove("open");
+        if (inp) inp.value = "";
+
+        showSaved(key);
+      })
+      .catch(err => {
+        if (spinner) spinner.style.display = "none";
+        if (inp) inp.disabled = false;
+        showToast("Regen error: " + err);
+      });
+  }
+
+  // ----------------------------------------------------------------
+  // updateSectionDOM — patch the live DOM after regen
+  // ----------------------------------------------------------------
+  function updateSectionDOM(key, content) {
+    // Simple text fields
+    const edEl = document.getElementById("ed-" + key);
+    if (edEl) {
+      edEl.innerText = typeof content === "string" ? content : JSON.stringify(content);
+      return;
+    }
+
+    // Experience bullets
+    if (key.startsWith("exp-")) {
+      const idx = key.replace("exp-", "");
+      const ul = document.getElementById("bl-" + idx);
+      if (!ul) return;
+      const bullets = Array.isArray(content) ? content : [String(content)];
+      ul.innerHTML = "";
+      bullets.forEach(b => {
+        const li = document.createElement("li");
+        li.className = "editable";
+        li.contentEditable = "false";
+        li.setAttribute("onblur", "saveBullets(" + idx + ")");
+        li.textContent = b;
+        ul.appendChild(li);
+      });
+      return;
+    }
+
+    // Skills
+    if (key === "skills") {
+      const grid = document.getElementById("skills-grid");
+      if (!grid) return;
+      if (typeof content !== "object" || Array.isArray(content)) return;
+      grid.innerHTML = "";
+      Object.entries(content).forEach(([cat, skills]) => {
+        const block = document.createElement("div");
+        block.className = "skills-cat-block";
+        block.dataset.cat = cat;
+
+        const nameDiv = document.createElement("div");
+        nameDiv.className = "skill-cat-name";
+        nameDiv.textContent = cat;
+        block.appendChild(nameDiv);
+
+        const tagsDiv = document.createElement("div");
+        tagsDiv.className = "skill-tags";
+        tagsDiv.dataset.cat = cat;
+        (Array.isArray(skills) ? skills : []).forEach(s => {
+          const span = document.createElement("span");
+          span.className = "skill-tag";
+          span.textContent = s;
+          tagsDiv.appendChild(span);
+        });
+        block.appendChild(tagsDiv);
+        grid.appendChild(block);
+      });
+      return;
+    }
+  }
+</script>
+</body>
+</html>
