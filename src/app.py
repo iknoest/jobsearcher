@@ -369,11 +369,19 @@ def api_skip():
         return jsonify({"error": str(exc)}), 500
 
 
+def _render_pdf(html_string):
+    """Render HTML to PDF bytes using xhtml2pdf (pure Python, no GTK needed)."""
+    from io import BytesIO
+    from xhtml2pdf import pisa
+
+    result = BytesIO()
+    pisa.CreatePDF(html_string, dest=result)
+    return result.getvalue()
+
+
 @app.route("/api/export/cv/<job_id>")
 def export_cv(job_id):
-    """Render CV PDF via weasyprint, return as download."""
-    import weasyprint
-
+    """Render CV PDF via xhtml2pdf, return as download."""
     draft, meta = _load_draft(job_id)
     if draft is None:
         return f"No draft found for job_id={job_id}", 404
@@ -383,7 +391,7 @@ def export_cv(job_id):
     company = metadata.get("company", "Company")
 
     html = render_template("cv_template.html", draft=draft, metadata=metadata)
-    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+    pdf_bytes = _render_pdf(html)
 
     safe_company = "".join(c for c in company if c.isalnum() or c in " _-").strip().replace(" ", "_")
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-").strip().replace(" ", "_")
@@ -400,9 +408,7 @@ def export_cv(job_id):
 
 @app.route("/api/export/cl/<job_id>")
 def export_cl(job_id):
-    """Render cover letter PDF via weasyprint, return as download."""
-    import weasyprint
-
+    """Render cover letter PDF via xhtml2pdf, return as download."""
     draft, meta = _load_draft(job_id)
     if draft is None:
         return f"No draft found for job_id={job_id}", 404
@@ -412,7 +418,7 @@ def export_cl(job_id):
     company = metadata.get("company", "Company")
 
     html = render_template("cl_template.html", draft=draft, metadata=metadata)
-    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+    pdf_bytes = _render_pdf(html)
 
     safe_company = "".join(c for c in company if c.isalnum() or c in " _-").strip().replace(" ", "_")
     safe_title = "".join(c for c in title if c.isalnum() or c in " _-").strip().replace(" ", "_")
