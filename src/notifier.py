@@ -499,13 +499,16 @@ def build_prerank_digest(df, output_dir="output"):
     return output_path
 
 
-def send_email(df, subject=None, filtered_count=0, keyword_stats=None):
-    """Send HTML email digest. Always saves locally too."""
+def send_email(df=None, subject=None, filtered_count=0, keyword_stats=None, html_body=None):
+    """Send HTML email. Accepts either a DataFrame (digest) or raw html_body."""
     sender = os.getenv("EMAIL_SENDER")
     password = os.getenv("EMAIL_APP_PASSWORD")
     recipient = os.getenv("EMAIL_RECIPIENT")
 
-    html = build_email_html(df, filtered_count=filtered_count, keyword_stats=keyword_stats)
+    if html_body is not None:
+        html = html_body
+    else:
+        html = build_email_html(df, filtered_count=filtered_count, keyword_stats=keyword_stats)
 
     output_path = f"output/digest_{datetime.now().strftime('%Y%m%d_%H%M')}.html"
     os.makedirs("output", exist_ok=True)
@@ -518,8 +521,11 @@ def send_email(df, subject=None, filtered_count=0, keyword_stats=None):
         return output_path
 
     if subject is None:
-        apply_n = len(df[df["decision_hint"] == "Apply"]) if "decision_hint" in df.columns else 0
-        subject = f"Jobsearcher: {apply_n} Apply, {len(df)} total -- {datetime.now().strftime('%Y-%m-%d')}"
+        if df is not None:
+            apply_n = len(df[df["decision_hint"] == "Apply"]) if "decision_hint" in df.columns else 0
+            subject = f"Jobsearcher: {apply_n} Apply, {len(df)} total -- {datetime.now().strftime('%Y-%m-%d')}"
+        else:
+            subject = f"Jobsearcher -- {datetime.now().strftime('%Y-%m-%d')}"
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
