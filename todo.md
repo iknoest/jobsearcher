@@ -40,16 +40,55 @@
 - [x] Separate language_prefilter() from enrich_and_filter() (two distinct pipeline stages)
 - [x] Add pytest coverage for language_prefilter and detect_phygital (15 new tests)
 
-## Phase 1e: Remaining Issues
-- [ ] Fix LLM JSON parsing failures (some jobs return 0% with parse error)
-- [ ] Run full keyword set (15 keywords across 3 tiers) — needs longer rate limit patience
-- [ ] Re-enable Indeed/Google/Glassdoor platforms (fix hanging on Windows, add timeouts)
-- [ ] Reduce LLM rate limiting impact (batch scoring or longer cooldowns)
+## Phase 1e: LLM Reliability & Pre-rank (completed 2026-04-12)
+- [x] Fix LLM JSON parsing — Gemini 2.5 Flash thinking tokens consumed output budget; disabled thinking for JSON generation
+- [x] Fix Dutch JD detection — langid log-prob threshold `> -100` was silently disabling detection for full-length JDs; removed threshold
+- [x] Add UTF-8 stdout reconfigure for Windows (Traditional Chinese from LLM no longer crashes)
+- [x] Remove dead OpenRouter model (stepfun/step-3.5-flash:free)
+- [x] Wire up 5 LLM providers: Gemini 2.5 Flash, Groq, NVIDIA NIM, Mistral, OpenRouter (auto-fallback)
+- [x] Pre-rank system (config/prerank.yaml) — rule-based scoring before LLM; --max-jobs N picks top N by pre-rank
+- [x] --no-score mode (scrape + filter + prerank + digest, skip LLM entirely)
+- [x] --rerank-only mode (re-apply prerank to cached enriched jobs, instant, no scrape/LLM)
+- [x] Cache enriched DataFrame to output/enriched_jobs.pkl after step 3
+- [x] Pre-rank digest (HTML table with scores/reasons, no LLM fields needed)
+- [x] Add "Product Engineer" to primary search keywords (found Quooker 82% Apply)
+- [x] 13 pre-rank tests, 53 total tests passing
 
-## Phase 2: Resume Tailoring
-- [ ] Resume tailoring per job match (generator.py)
-- [ ] Cover letter generation per job match
-- [ ] Output to Google Sheets with download links
+## Phase 1f: Digest Quality & LLM Card Fixes (completed 2026-04-12)
+- [x] Fix KM Visa chip — use `km_visa_sponsor OR km_visa_mentioned` (IND register, not just JD text)
+- [x] Add RoleSummary field to SCORING_PROMPT — 1-2 English sentences of daily duties + specific tools
+- [x] Add RULE 8 to SCORING_PROMPT — WhyFit must be employer-facing; forbidden: generic seniority, filter logic (no Dutch / NL location / no licence)
+- [x] Add RULE 9 to SCORING_PROMPT — Gaps only for explicit JD requirements Ava can't meet; never fabricate; empty array if no real gaps
+- [x] Add role_summary to notifier _parse_card() and EMAIL_TEMPLATE (italic muted block above WhyFit)
+- [x] Tighten StrongMatch/PartialMatch/Gaps schema descriptions to enforce quality rules
+
+## Phase 1g: Remaining Issues
+- [ ] Run full keyword set (15 keywords across 3 tiers) — now feasible with pre-rank filtering
+- [ ] Re-enable Indeed/Google/Glassdoor platforms (fix hanging on Windows, add timeouts)
+- [ ] Fix Google Sheets feedback sync (header row has duplicate empty cells)
+- [ ] Add short-circuit: if all LLM providers rate-limited once, bail out of scoring loop
+- [ ] Populate industry_bonus / skill_bonus in config/prerank.yaml based on scoring patterns
+
+## Phase 2: CV Tailoring & Cover Letter (completed 2026-04-13)
+- [x] KeySkills extraction in SCORING_PROMPT — LLM outputs 5-8 key skills per JD
+- [x] KeySkills chip display in email digest (neutral-colored MVP)
+- [x] View/Apply/Skip buttons in email digest (replace single "View & Apply")
+- [x] CV tailoring engine (`src/generator.py`) — angle selection, LLM prompt, structured JSON output
+- [x] Cover letter generation per job match (integrated in generator.py)
+- [x] Cover letter style reference (`profile/cover_letter_reference.md`)
+- [x] Flask review server (`src/app.py`) — routes for review, tailor, skip, regenerate, export
+- [x] Three-panel review UI (`templates/review.html`) — JD context | CV draft editor | cover letter editor
+- [x] Skip feedback page (`templates/skip.html`) — quick-select reasons → Google Sheets
+- [x] PDF templates for CV (two-column) and cover letter (single-column)
+- [x] PDF export via xhtml2pdf (pure Python, no GTK dependency)
+- [x] Refactored `send_email()` to accept arbitrary subject + html_body
+- [x] Draft notification email with review link
+- [x] 60 tests passing
+
+## Phase 2b: Remaining
+- [ ] Output tailored CV links to Google Sheets
+- [ ] Profile-matching skill chip colors (green/red) in email digest
+- [ ] n8n webhook nodes for Apply/Skip triggers (currently uses localhost direct)
 
 ## Phase 3: Enhancements
 - [ ] Company enrichment (Glassdoor ratings, Google reviews, company size via web scraping)
