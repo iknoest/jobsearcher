@@ -542,6 +542,25 @@ Info:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update):
         return await _deny(update)
+
+    # Handle deep links from email buttons: /start good_<job_id>  or  /start skip_<job_id>
+    if context.args:
+        param = context.args[0]
+        if param.startswith("good_"):
+            job_id = param[5:]
+            await _write_feedback(update, job_id, verdict="Good Match", reason="Tapped from email digest")
+            return
+        if param.startswith("skip_"):
+            job_id = param[5:]
+            # Ask for reason via follow-up (record default now, user can refine with /skip)
+            await _write_feedback(update, job_id, verdict="Disagree-Skip", reason="Skipped from email digest")
+            await update.message.reply_text(
+                f"Recorded Skip for job `{job_id}`.\n"
+                f"Add a reason with: `/skip {job_id} <reason>`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
     await update.message.reply_text(HELP_TEXT, parse_mode=ParseMode.MARKDOWN)
 
 

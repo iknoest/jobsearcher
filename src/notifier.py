@@ -1,10 +1,13 @@
-"""Email digest — 3-layer decision card layout.
+"""Email digest — three-tier decision card layout.
 
-Layer 1: Decision signals (score, hint, blockers, work mode, salary, language, risk)
-Layer 2: Fast explanation (WhyFit Strong/Partial, Gaps, Risks)
-Layer 3: Expandable detail (Phygital, Company, ScoreBreakdown, TrustNotes)
+Tiers:
+  Apply    — full cards, always shown
+  Maybe    — full cards, only shown when Apply < 5
+  Uncertain — full cards for LLM Confidence=Low jobs (any score), always shown
+  Skip     — aggregated count only
 
-Apply + Maybe = full cards. Skip = one-line summary.
+Buttons per card: View · Good match (TG deep link) · Skip (TG deep link)
+Set TG_BOT_USERNAME in .env to enable TG buttons; falls back to View-only.
 """
 
 import os
@@ -63,6 +66,9 @@ EMAIL_TEMPLATE = """
   .card { background: #fff; border-radius: 14px; margin-bottom: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e5e5ea; }
   .card.apply { border-left: 5px solid #34c759; }
   .card.maybe { border-left: 5px solid #ff9f0a; }
+  .card.uncertain { border-left: 5px solid #8e8e93; }
+  .pill.uncertain { background: #e5e5ea; color: #515154; }
+  .section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #86868b; margin: 18px 0 8px; padding-left: 4px; }
 
   /* --- LAYER 1: Decision Strip --- */
   .L1 { padding: 14px 16px 10px; }
@@ -160,6 +166,7 @@ EMAIL_TEMPLATE = """
     {{ date }}
     &middot; <span class="s-apply">{{ apply_count }} Apply</span>
     &middot; <span class="s-maybe">{{ maybe_count }} Maybe</span>
+    {% if uncertain_count > 0 %}&middot; <span style="color:#8e8e93; font-weight:600;">{{ uncertain_count }} Uncertain</span>{% endif %}
     &middot; <span class="s-skip">{{ skip_count }} Skip</span>
     {% if filtered_count > 0 %}&middot; {{ filtered_count }} pre-filtered{% endif %}
   </div>
@@ -173,15 +180,19 @@ EMAIL_TEMPLATE = """
   {% endif %}
 </div>
 
-{% if not actionable_jobs %}
+{% if not apply_jobs and not maybe_jobs and not uncertain_jobs %}
 <div class="empty">
   <div class="icon">--</div>
   <div>No actionable matches today.</div>
-  <div style="font-size:12px; margin-top:4px;">{{ total_jobs }} scored, all below 60%. See skip list below.</div>
+  <div style="font-size:12px; margin-top:4px;">{{ total_jobs }} scored, all below threshold. See Google Sheet.</div>
 </div>
 {% endif %}
 
-{% for j in actionable_jobs %}
+{% if apply_jobs %}
+{% if maybe_jobs or uncertain_jobs %}<div class="section-label">Apply</div>{% endif %}
+{% endif %}
+
+{% for j in apply_jobs %}
 <div class="card {{ j.decision_class }}">
 
   <!-- LAYER 1: Decision Strip -->
@@ -289,20 +300,144 @@ EMAIL_TEMPLATE = """
       {% if j.missing_info %}<span class="missing"> · Missing: {{ j.missing_info | join(', ') }}</span>{% endif %}
     </div>
 
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top: 10px;">
-      <tr>
-        <td style="border-radius: 8px; background-color: #f0f0f5;">
-          <a href="{{ j.job_url }}" style="display: inline-block; padding: 7px 18px; color: #1d1d1f; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">View</a>
-        </td>
-      </tr>
-    </table>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top: 10px;"><tr>
+      <td style="padding-right: 6px;"><a href="{{ j.job_url }}" style="display: inline-block; padding: 7px 18px; color: #1d1d1f; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">View</a></td>
+      {% if tg_bot_username %}
+      <td style="padding-right: 6px;"><a href="https://t.me/{{ tg_bot_username }}?start=good_{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #fff; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #34c759;">Good match</a></td>
+      <td><a href="https://t.me/{{ tg_bot_username }}?start=skip_{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #86868b; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">Skip</a></td>
+      {% endif %}
+    </tr></table>
   </div>
 </div>
 {% endfor %}
 
+{% if maybe_jobs %}
+<div class="section-label">Maybe{% if apply_count >= 5 %} (hidden — {{ apply_count }} Apply already){% endif %}</div>
+{% for j in maybe_jobs %}
+<div class="card {{ j.decision_class }}">
+
+  <!-- LAYER 1: Decision Strip -->
+  <div class="L1">
+    <div class="L1-top">
+      <div class="score-ring {{ j.score_class }}">{{ j.score }}</div>
+      <div class="L1-info">
+        <div class="job-title">{{ j.title }}</div>
+        <div class="company-line">{{ j.company }}{% if j.industry %} · {{ j.industry }}{% endif %}</div>
+        <div class="top-label">{{ j.top_label }}</div>
+      </div>
+      <span class="pill {{ j.decision_class }}">{{ j.hint }}</span>
+    </div>
+    {% if j.blocking %}<div class="blocking">{{ j.blocking }}</div>{% endif %}
+    <div class="signals">
+      {% if j.job_type %}<span class="chip c-purple">{{ j.job_type }}</span> {% endif %}
+      <span class="chip c-gray">{{ j.work_mode }}</span>
+      {% if j.salary != 'Unknown' %} <span class="chip c-green">{{ j.salary }}</span>{% endif %}
+      {% if j.commute != 'Unknown' %} <span class="chip c-gray">{{ j.commute }}</span>{% endif %}
+      <span class="chip {% if j.lang_class == 'ok' %}c-green{% elif j.lang_class == 'risk' %}c-red{% else %}c-amber{% endif %}">{{ j.language }}</span>
+      {% if j.phygital_level == 'Strong' %} <span class="chip c-blue">Phygital</span>{% elif j.phygital_level == 'Moderate' %} <span class="chip c-amber">Phygital-adj</span>{% endif %}
+      {% if j.km_visa %} <span class="chip c-green">KM Visa</span>{% endif %}
+      {% if j.is_agency %} <span class="chip c-gray">Agency</span>{% endif %}
+      {% if j.driver_flagged %} <span class="chip c-amber">Driving Licence</span>{% endif %}
+    </div>
+    {% if j.main_risk %}<div class="risk-line">{{ j.main_risk }}</div>{% endif %}
+    {% if j.key_skills %}
+    <div class="skill-chips">{% for sk in j.key_skills %}<span class="skill-chip skill-neutral">{{ sk }}</span> {% endfor %}</div>
+    {% endif %}
+  </div>
+
+  <!-- LAYER 2: Fast Explanation -->
+  <div class="L2">
+    {% if j.role_summary %}<div class="role-summary">{{ j.role_summary }}</div>{% endif %}
+    {% if j.strong_match or j.partial_match %}
+    <div class="sec"><div class="sec-title">Why Fit</div>
+      <div class="sec-body"><ul>
+        {% for s in j.strong_match %}<li class="strong">{{ s }}</li>{% endfor %}
+        {% for s in j.partial_match %}<li class="partial">~ {{ s }}</li>{% endfor %}
+      </ul></div>
+    </div>{% endif %}
+    {% if j.gaps %}<div class="sec"><div class="sec-title">Gaps</div><div class="sec-body"><ul>{% for g in j.gaps %}<li class="gap">{{ g }}</li>{% endfor %}</ul></div></div>{% endif %}
+    {% if j.risks %}<div class="sec"><div class="sec-title">Risks</div><div class="sec-body"><ul>{% for r in j.risks %}<li class="risk">{{ r }}</li>{% endfor %}</ul></div></div>{% endif %}
+  </div>
+
+  <!-- LAYER 3: Detail -->
+  <div class="L3">
+    {% if j.phygital_reason %}<div class="sec"><div class="phygital-bar"><span class="phy-level {{ j.phygital_class }}">{{ j.phygital_level }}</span><span>{{ j.phygital_reason }}</span></div></div>{% endif %}
+    {% if j.co_industry or j.co_size or j.co_km %}<div class="sec"><div class="co-box">{% if j.co_industry %}<div class="co-item"><span>Industry</span> {{ j.co_industry }}</div>{% endif %}{% if j.co_size %}<div class="co-item"><span>Size</span> {{ j.co_size }}</div>{% endif %}{% if j.co_km %}<div class="co-item"><span>KM</span> {{ j.co_km }}</div>{% endif %}</div></div>{% endif %}
+    {% if j.pos_drivers or j.neg_drivers %}<div class="sec"><div class="sec-title">Score Drivers</div><div class="drivers">{% for d in j.pos_drivers %}<span class="drv drv-pos">{{ d.label }} {{ d.impact }}</span>{% endfor %}{% for d in j.neg_drivers %}<span class="drv drv-neg">{{ d.label }} {{ d.impact }}</span>{% endfor %}</div></div>{% endif %}
+    <div class="trust"><span class="conf">Confidence: {{ j.confidence }}</span>{% if j.missing_info %}<span class="missing"> · Missing: {{ j.missing_info | join(', ') }}</span>{% endif %}</div>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top: 10px;"><tr>
+      <td style="padding-right: 6px;"><a href="{{ j.job_url }}" style="display: inline-block; padding: 7px 18px; color: #1d1d1f; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">View</a></td>
+      {% if tg_bot_username %}
+      <td style="padding-right: 6px;"><a href="https://t.me/{{ tg_bot_username }}?start=good_{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #fff; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #34c759;">Good match</a></td>
+      <td><a href="https://t.me/{{ tg_bot_username }}?start=skip_{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #86868b; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">Skip</a></td>
+      {% endif %}
+    </tr></table>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if uncertain_jobs %}
+<div class="section-label">Uncertain — LLM flagged low confidence</div>
+{% for j in uncertain_jobs %}
+<div class="card uncertain">
+
+  <div class="L1">
+    <div class="L1-top">
+      <div class="score-ring {{ j.score_class }}">{{ j.score }}</div>
+      <div class="L1-info">
+        <div class="job-title">{{ j.title }}</div>
+        <div class="company-line">{{ j.company }}{% if j.industry %} · {{ j.industry }}{% endif %}</div>
+        <div class="top-label">{{ j.top_label }}</div>
+      </div>
+      <span class="pill uncertain">Uncertain</span>
+    </div>
+    {% if j.blocking %}<div class="blocking">{{ j.blocking }}</div>{% endif %}
+    <div class="signals">
+      {% if j.job_type %}<span class="chip c-purple">{{ j.job_type }}</span> {% endif %}
+      <span class="chip c-gray">{{ j.work_mode }}</span>
+      {% if j.salary != 'Unknown' %} <span class="chip c-green">{{ j.salary }}</span>{% endif %}
+      {% if j.commute != 'Unknown' %} <span class="chip c-gray">{{ j.commute }}</span>{% endif %}
+      <span class="chip {% if j.lang_class == 'ok' %}c-green{% elif j.lang_class == 'risk' %}c-red{% else %}c-amber{% endif %}">{{ j.language }}</span>
+      {% if j.phygital_level == 'Strong' %} <span class="chip c-blue">Phygital</span>{% elif j.phygital_level == 'Moderate' %} <span class="chip c-amber">Phygital-adj</span>{% endif %}
+      {% if j.km_visa %} <span class="chip c-green">KM Visa</span>{% endif %}
+    </div>
+    {% if j.main_risk %}<div class="risk-line">{{ j.main_risk }}</div>{% endif %}
+    {% if j.key_skills %}
+    <div class="skill-chips">{% for sk in j.key_skills %}<span class="skill-chip skill-neutral">{{ sk }}</span> {% endfor %}</div>
+    {% endif %}
+  </div>
+
+  <div class="L2">
+    {% if j.role_summary %}<div class="role-summary">{{ j.role_summary }}</div>{% endif %}
+    {% if j.strong_match or j.partial_match %}
+    <div class="sec"><div class="sec-title">Why Fit (uncertain)</div>
+      <div class="sec-body"><ul>
+        {% for s in j.strong_match %}<li class="strong">{{ s }}</li>{% endfor %}
+        {% for s in j.partial_match %}<li class="partial">~ {{ s }}</li>{% endfor %}
+      </ul></div>
+    </div>{% endif %}
+    {% if j.gaps %}<div class="sec"><div class="sec-title">Gaps</div><div class="sec-body"><ul>{% for g in j.gaps %}<li class="gap">{{ g }}</li>{% endfor %}</ul></div></div>{% endif %}
+    {% if j.missing_info %}<div class="sec"><div class="sec-title">Missing info</div><div class="sec-body" style="color:#86868b;">{{ j.missing_info | join(' · ') }}</div></div>{% endif %}
+  </div>
+
+  <div class="L3">
+    <div class="trust"><span class="conf">Confidence: {{ j.confidence }}</span></div>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top: 10px;"><tr>
+      <td style="padding-right: 6px;"><a href="{{ j.job_url }}" style="display: inline-block; padding: 7px 18px; color: #1d1d1f; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">View</a></td>
+      {% if tg_bot_username %}
+      <td style="padding-right: 6px;"><a href="https://t.me/{{ tg_bot_username }}?start=good_{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #fff; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #34c759;">Good match</a></td>
+      <td><a href="https://t.me/{{ tg_bot_username }}?start=skip_{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #86868b; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">Skip</a></td>
+      {% endif %}
+    </tr></table>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
 {% if skip_count > 0 %}
 <div style="text-align: center; color: #86868b; font-size: 12px; margin-top: 16px;">
-  {{ skip_count }} jobs scored below 60% -- see Google Sheet for details
+  {{ skip_count }} jobs scored below 60% — see Google Sheet for details
 </div>
 {% endif %}
 
@@ -390,11 +525,21 @@ def _parse_card(row):
 
 
 def build_email_html(df, filtered_count=0, keyword_stats=None):
-    """Render digest. Only Apply+Maybe as full cards. Skip as summary line."""
+    """Render three-tier digest: Apply / Maybe (Apply<5 only) / Uncertain / Skip count."""
+    tg_bot_username = os.getenv("TG_BOT_USERNAME", "")
+
     all_cards = [_parse_card(row) for _, row in df.iterrows()]
 
-    actionable = [c for c in all_cards if c["hint"] in ("Apply", "Maybe")]
-    skip_count = sum(1 for c in all_cards if c["hint"] == "Skip")
+    apply_jobs = [c for c in all_cards if c["hint"] == "Apply" and c["confidence"] != "Low"]
+    apply_count = len(apply_jobs)
+
+    # Maybe only surfaced when Apply < 5
+    maybe_jobs = [c for c in all_cards if c["hint"] == "Maybe" and c["confidence"] != "Low"] if apply_count < 5 else []
+
+    # Uncertain: LLM self-flagged Confidence=Low, any score
+    uncertain_jobs = [c for c in all_cards if c["confidence"] == "Low"]
+
+    skip_count = sum(1 for c in all_cards if c["hint"] == "Skip" and c["confidence"] != "Low")
 
     template = Template(EMAIL_TEMPLATE)
     keywords = ", ".join(df["search_keyword"].unique()) if "search_keyword" in df.columns else "all"
@@ -402,13 +547,17 @@ def build_email_html(df, filtered_count=0, keyword_stats=None):
     return template.render(
         date=datetime.now().strftime("%Y-%m-%d"),
         total_jobs=len(all_cards),
-        apply_count=sum(1 for c in all_cards if c["hint"] == "Apply"),
-        maybe_count=sum(1 for c in all_cards if c["hint"] == "Maybe"),
+        apply_count=apply_count,
+        maybe_count=len(maybe_jobs),
+        uncertain_count=len(uncertain_jobs),
         skip_count=skip_count,
         filtered_count=filtered_count,
-        actionable_jobs=actionable,
+        apply_jobs=apply_jobs,
+        maybe_jobs=maybe_jobs,
+        uncertain_jobs=uncertain_jobs,
         keyword_stats=keyword_stats or [],
         keywords_used=keywords,
+        tg_bot_username=tg_bot_username,
     )
 
 

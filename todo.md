@@ -95,10 +95,14 @@
 - [x] Rules commands write to Rules tab (`/block`, `/addkw`, `/rmkw`, `/wait`, `/ok`)
 - [x] `/rules` shows all active rules from Rules tab; `/stats` shows pipeline totals + your feedback history
 
-## Phase D: Email redesign
-- [ ] Three-tier digest: Apply · Maybe (conditional on Apply<5) · **Uncertain** (LLM low-confidence, any score)
-- [ ] Skip tier aggregated, not per-row
-- [ ] TG deep-link buttons: `View` · `Good match` · `Skip (reason)`
+## Phase D: Email redesign (completed 2026-04-15)
+- [x] Three-tier digest: Apply · Maybe (only when Apply < 5) · **Uncertain** (LLM Confidence=Low, any score)
+- [x] Skip tier: aggregated count only, no per-row cards
+- [x] TG deep-link buttons per card: `View` · `Good match` · `Skip` (stateless, no server needed)
+- [x] Deep links handled in tg_bot.py `/start good_<id>` / `/start skip_<id>` — records verdict immediately
+- [x] Skip from email defaults to "Skipped from email digest"; user can refine with `/skip <id> <reason>`
+- [x] `TG_BOT_USERNAME` env var enables TG buttons; falls back to View-only if not set
+- [x] Uncertain card styled in grey, section-label header, shows missing info prominently
 
 ## Phase E: Learning tweaks
 - [ ] 1-sample weight nudge by default (±3 pts)
