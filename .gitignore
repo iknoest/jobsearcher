@@ -13,10 +13,9 @@ __pycache__/
 n8n-data/
 
 # Personal data
-profile/cv_*.pdf
-profile/cover_letter_*.pdf
 profile/
 output/
+MasterCV_Coverletter/
 
 # Google service account credentials
 *.json

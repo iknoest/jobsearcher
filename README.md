@@ -84,35 +84,11 @@ python src/main.py --scrape-only                # scrape + filter only, no prera
 
 `--rerank-only` is the fastest iteration loop: tweak `config/prerank.yaml`, re-run, see the new ranking. Uses the cache at `output/enriched_jobs.parquet` written by the most recent `--no-score` or `--manual` run.
 
-### CV Tailoring & Cover Letter / 履歷客製化 (Phase 2)
+### Feedback Loop (in redesign) / 回饋循環
 
-When the email digest arrives, each job card has three buttons:
+Each job card in the email has a **View** button. Positive/negative feedback (Good match / Skip with reason) will move to Telegram deep links in the next phase, with Google Sheets as the single source of truth. Ad-hoc JD links or raw text can be dropped into a Sheets `Inbox` tab to be scored on the next run.
 
-| Button | Action |
-|--------|--------|
-| **View** | Opens the job posting (LinkedIn/company site) |
-| **Apply** | Triggers automatic CV + cover letter tailoring via LLM |
-| **Skip** | Opens quick feedback page — selects reason, feeds back to scoring model |
-
-**Apply flow / 申請流程:**
-1. Click "Apply" → system auto-selects CV angle (Engineering / Strategy / Hybrid) based on job analysis
-2. LLM rewrites every CV section — headline, summary, bullets, skills — to mirror JD keywords
-3. LLM generates a tailored cover letter using your Philips-style reference
-4. You receive "CV Ready" email with link to review page
-
-**Review UI / 審閱介面:**
-```bash
-python src/app.py          # Start review server at localhost:5000
-```
-Three-panel editor: JD context (read-only) | CV draft (editable) | Cover letter (editable)
-- [Edit] any section inline
-- [Regenerate] any section with optional instruction ("emphasize more hardware")
-- Export as styled PDF when satisfied
-
-**Direct CLI / 直接命令列:**
-```bash
-python src/generator.py --job-url "https://www.linkedin.com/jobs/view/4400368636"
-```
+CV tailoring was removed 2026-04-14 — the tool now focuses on surfacing good matches and learning from fast feedback.
 
 ### Future / 未來功能
 - Career 覆盤 (retrospective) — AI-guided career positioning
@@ -169,11 +145,9 @@ Jobsearcher/
 │   ├── scraper.py           # JobSpy wrapper (multi-keyword, multi-platform)
 │   ├── filters.py           # Pre-LLM filtering & enrichment (Dutch, seniority, Phygital, agency, etc.)
 │   ├── matcher.py           # LLM scoring — Phygital-weighted, 3-layer card output
-│   ├── generator.py         # CV + cover letter tailoring engine (LLM-based)
-│   ├── app.py               # Flask review server (edit, regenerate, export PDF)
 │   ├── travel.py            # Travel time estimation from Hoofddorp
 │   ├── sheets.py            # Google Sheets storage, dedup, feedback sync
-│   ├── notifier.py          # Email digest — 3-layer card layout + View/Apply/Skip buttons
+│   ├── notifier.py          # Email digest — 3-layer card layout with View button
 │   └── llm/
 │       ├── __init__.py
 │       └── router.py        # Multi-LLM router with OpenRouter free model rotation
@@ -185,21 +159,13 @@ Jobsearcher/
 ├── n8n/
 │   ├── docker-compose.yml   # n8n local Docker setup
 │   └── workflow.json        # n8n workflow (daily 8AM + manual webhook)
-├── profile/
-│   ├── cv_base.md           # Base CV in markdown (source of truth)
-│   └── cover_letter_reference.md  # Philips cover letter as style guide
-├── templates/
-│   ├── review.html          # Three-panel CV review + edit page
-│   ├── skip.html            # Skip feedback quick-select page
-│   ├── cv_template.html     # Two-column CV layout for PDF export
-│   ├── cl_template.html     # Cover letter layout for PDF export
-│   └── cover_letter.md      # Cover letter template (legacy)
-├── output/                  # Generated digests, CSVs, seen_jobs cache
+├── output/                  # Generated digests, CSVs, seen_jobs cache (gitignored)
 ├── .env.example
 ├── requirements.txt
 ├── CLAUDE.md
 ├── README.md
-└── todo.md
+├── todo.md
+└── lessons.md               # Append-only log of non-obvious decisions & incidents
 ```
 
 ## Reference Projects / 參考項目

@@ -62,33 +62,51 @@
 - [x] Add role_summary to notifier _parse_card() and EMAIL_TEMPLATE (italic muted block above WhyFit)
 - [x] Tighten StrongMatch/PartialMatch/Gaps schema descriptions to enforce quality rules
 
-## Phase 1g: Remaining Issues
+## Phase 2: CV Tailoring (REMOVED 2026-04-14)
+- Deleted: `src/generator.py`, `src/app.py`, all `templates/cv_*`, `cl_*`, `review.html`, `skip.html`, `cover_letter.md`, `profile/cv_base.md`, `profile/cover_letter_reference.md`, `MasterCV_Coverletter/`, `output/tailored/`, `tests/test_generator.py`, `scripts/export_tailored_pdfs.py`
+- Reason: LLM-generated CVs could not hit the quality bar (fabricated skills, wrong experience order, poor layout, no photo). Maintenance cost > value. See `lessons.md`.
+- Scoring-phase KeySkills extraction and chip display are **kept** — they're useful signal regardless.
+
+## Phase A: Cleanup (in progress — this commit)
+- [x] Delete CV tailoring files
+- [x] `.gitignore` `MasterCV_Coverletter/` (local only)
+- [x] Remove Apply/Skip buttons from email digest (View only until Phase D)
+- [x] Strip Phase-2 sections from `CLAUDE.md`, `README.md`
+- [x] Create `lessons.md` and migrate lessons out of `CLAUDE.md`
+- [x] Add `lessons.md` to auto-update rule
+
+## Phase B: Sheets schema
+- [ ] Add `Inbox` tab (you drop URLs or raw JD text; next run picks up & scores)
+- [ ] Add `Rules` tab (dynamic weight adjustments + keyword blocks/adds; human-editable)
+- [ ] Add `Confidence` column to `Jobs` (High/Med/Low from LLM)
+- [ ] Teach scoring prompt to set Confidence explicitly
+
+## Phase C: Telegram bot
+- [ ] Dedicated jobsearcher bot (separate token from the existing `plugin:telegram` bot)
+- [ ] Long-poll handler `src/tg_bot.py` — writes every command into Sheets tabs
+- [ ] Commands: `/good`, `/skip`, `/uncertain`, `/score`, `/block`, `/addkw`, `/rmkw`, `/wait`, `/ok`, `/rules`, `/stats`
+- [ ] Sheets-edit ingestion (same commands work as `Rules` tab rows)
+
+## Phase D: Email redesign
+- [ ] Three-tier digest: Apply · Maybe (conditional on Apply<5) · **Uncertain** (LLM low-confidence, any score)
+- [ ] Skip tier aggregated, not per-row
+- [ ] TG deep-link buttons: `View` · `Good match` · `Skip (reason)`
+
+## Phase E: Learning tweaks
+- [ ] 1-sample weight nudge by default (±3 pts)
+- [ ] Auto-pattern detection across 3 similar verdicts (±8 pts + TG notify)
+- [ ] `/wait <pattern>` freeze + `/ok <pattern>` unfreeze
+
+## Phase F: Ad-hoc scoring
+- [ ] `Inbox` tab poller integrated into pipeline
+- [ ] `/score <url|text>` — returns score + which filter would reject (if any)
+
+## Phase 1g: Remaining (still relevant)
 - [ ] Run full keyword set (15 keywords across 3 tiers) — now feasible with pre-rank filtering
 - [ ] Re-enable Indeed/Google/Glassdoor platforms (fix hanging on Windows, add timeouts)
 - [ ] Fix Google Sheets feedback sync (header row has duplicate empty cells)
 - [ ] Add short-circuit: if all LLM providers rate-limited once, bail out of scoring loop
-- [ ] Populate industry_bonus / skill_bonus in config/prerank.yaml based on scoring patterns
-
-## Phase 2: CV Tailoring & Cover Letter (completed 2026-04-13)
-- [x] KeySkills extraction in SCORING_PROMPT — LLM outputs 5-8 key skills per JD
-- [x] KeySkills chip display in email digest (neutral-colored MVP)
-- [x] View/Apply/Skip buttons in email digest (replace single "View & Apply")
-- [x] CV tailoring engine (`src/generator.py`) — angle selection, LLM prompt, structured JSON output
-- [x] Cover letter generation per job match (integrated in generator.py)
-- [x] Cover letter style reference (`profile/cover_letter_reference.md`)
-- [x] Flask review server (`src/app.py`) — routes for review, tailor, skip, regenerate, export
-- [x] Three-panel review UI (`templates/review.html`) — JD context | CV draft editor | cover letter editor
-- [x] Skip feedback page (`templates/skip.html`) — quick-select reasons → Google Sheets
-- [x] PDF templates for CV (two-column) and cover letter (single-column)
-- [x] PDF export via xhtml2pdf (pure Python, no GTK dependency)
-- [x] Refactored `send_email()` to accept arbitrary subject + html_body
-- [x] Draft notification email with review link
-- [x] 60 tests passing
-
-## Phase 2b: Remaining
-- [ ] Output tailored CV links to Google Sheets
-- [ ] Profile-matching skill chip colors (green/red) in email digest
-- [ ] n8n webhook nodes for Apply/Skip triggers (currently uses localhost direct)
+- [ ] Populate industry_bonus / skill_bonus in `config/prerank.yaml` based on scoring patterns
 
 ## Phase 3: Enhancements
 - [ ] Company enrichment (Glassdoor ratings, Google reviews, company size via web scraping)

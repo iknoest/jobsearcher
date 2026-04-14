@@ -289,11 +289,13 @@ EMAIL_TEMPLATE = """
       {% if j.missing_info %}<span class="missing"> · Missing: {{ j.missing_info | join(', ') }}</span>{% endif %}
     </div>
 
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top: 10px;"><tr>
-      <td style="border-radius: 8px; background-color: #f0f0f5; padding-right: 6px;"><a href="{{ j.job_url }}" style="display: inline-block; padding: 7px 18px; color: #1d1d1f; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">View</a></td>
-      <td style="border-radius: 8px; background-color: #34c759; padding-right: 6px;"><a href="http://localhost:5000/tailor/{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #fff; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #34c759;">Apply</a></td>
-      <td style="border-radius: 8px; background-color: #f0f0f5;"><a href="http://localhost:5000/skip/{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #86868b; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">Skip</a></td>
-    </tr></table>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top: 10px;">
+      <tr>
+        <td style="border-radius: 8px; background-color: #f0f0f5;">
+          <a href="{{ j.job_url }}" style="display: inline-block; padding: 7px 18px; color: #1d1d1f; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">View</a>
+        </td>
+      </tr>
+    </table>
   </div>
 </div>
 {% endfor %}
