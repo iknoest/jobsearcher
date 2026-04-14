@@ -85,11 +85,15 @@
 - [x] `read_rules()` — merges sheet-based weight_adjustments with learned ones
 - [x] Inbox jobs flow through full pipeline (filter → prerank → LLM → Sheets); rows marked Scored on completion
 
-## Phase C: Telegram bot
-- [ ] Dedicated jobsearcher bot (separate token from the existing `plugin:telegram` bot)
-- [ ] Long-poll handler `src/tg_bot.py` — writes every command into Sheets tabs
-- [ ] Commands: `/good`, `/skip`, `/uncertain`, `/score`, `/block`, `/addkw`, `/rmkw`, `/wait`, `/ok`, `/rules`, `/stats`
-- [ ] Sheets-edit ingestion (same commands work as `Rules` tab rows)
+## Phase C: Telegram bot (completed 2026-04-15)
+- [x] Dedicated jobsearcher bot (separate token: `TG_JOBSEARCHER_BOT_TOKEN`; separate from Claude Code plugin)
+- [x] Long-poll handler `src/tg_bot.py` — run with `python src/tg_bot.py`
+- [x] Auth guard: `TG_ALLOWED_USER_IDS` (comma-separated) restricts access
+- [x] Commands: `/good`, `/skip`, `/uncertain`, `/score`, `/block`, `/addkw`, `/rmkw`, `/wait`, `/ok`, `/rules`, `/stats`, `/start`, `/help`
+- [x] Feedback commands write verdict directly to Jobs tab (My Verdict + My Reason) + local feedback_log
+- [x] `/score <url|text>` — fetches JD via trafilatura if URL, runs pre-filters + LLM, returns decision card
+- [x] Rules commands write to Rules tab (`/block`, `/addkw`, `/rmkw`, `/wait`, `/ok`)
+- [x] `/rules` shows all active rules from Rules tab; `/stats` shows pipeline totals + your feedback history
 
 ## Phase D: Email redesign
 - [ ] Three-tier digest: Apply · Maybe (conditional on Apply<5) · **Uncertain** (LLM low-confidence, any score)
