@@ -84,6 +84,8 @@ def call_llm(prompt, config=None, max_retries=4):
                 result = _call_gemini(prompt, model_config)
             elif provider == "openai":
                 result = _call_openai(prompt, model_config)
+            elif provider == "openai_compat":
+                result = _call_openai_compat(prompt, model_config)
             elif provider == "openrouter":
                 result = _call_openrouter(prompt, model_config)
             else:
@@ -132,11 +134,22 @@ def _call_anthropic(prompt, config):
 
 def _call_gemini(prompt, config):
     from google import genai
+    from google.genai import types
 
     client = genai.Client(api_key=os.getenv(config["env_key"]))
+    # Gemini 2.5 Flash is a "thinking" model — thinking tokens consume the
+    # max_output_tokens budget.  Disable thinking for structured JSON output
+    # so the full budget goes to the actual response.
     response = client.models.generate_content(
         model=config["model"],
         contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=_JSON_SYSTEM,
+            temperature=0.1,
+            max_output_tokens=config.get("max_output_tokens", 2500),
+            response_mime_type="application/json",
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        ),
     )
     return response.text
 
@@ -153,6 +166,26 @@ def _call_openai(prompt, config):
     return response.choices[0].message.content
 
 
+def _call_openai_compat(prompt, config):
+    """Call any OpenAI-compatible API (NVIDIA, Groq, Together, etc.)."""
+    from openai import OpenAI
+
+    client = OpenAI(
+        base_url=config["api_base"],
+        api_key=os.getenv(config["env_key"]),
+    )
+    response = client.chat.completions.create(
+        model=config["model"],
+        max_tokens=config.get("max_output_tokens", 2500),
+        temperature=0.1,
+        messages=[
+            {"role": "system", "content": _JSON_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    return response.choices[0].message.content
+
+
 OPENROUTER_FREE_MODELS = [
     "qwen/qwen3-next-80b-a3b-instruct:free",
     "google/gemma-4-31b-it:free",
@@ -161,7 +194,6 @@ OPENROUTER_FREE_MODELS = [
     "nousresearch/hermes-3-llama-3.1-405b:free",
     "minimax/minimax-m2.5:free",
     "google/gemma-3-27b-it:free",
-    "stepfun/step-3.5-flash:free",
     "openai/gpt-oss-120b:free",
 ]
 

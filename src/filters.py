@@ -29,11 +29,17 @@ def detect_language(text):
 
 
 def is_dutch_jd(description):
-    """Check if JD is primarily written in Dutch."""
+    """Check if JD is primarily written in Dutch.
+
+    langid.classify() returns (lang, log_probability). The log-prob scales
+    with text length (longer → more negative) so it is NOT a confidence
+    score. What matters is that 'nl' is the top language — which it is,
+    since classify() returns the best match. No threshold needed.
+    """
     if not description or len(description.strip()) < 50:
         return False
-    lang, confidence = detect_language(description)
-    return lang == "nl" and confidence > -100  # langid confidence is log-prob, any 'nl' classification is reliable
+    lang, _ = detect_language(description)
+    return lang == "nl"
 
 
 # --- Pattern definitions ---

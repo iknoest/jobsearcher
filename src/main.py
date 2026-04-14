@@ -1,15 +1,21 @@
 """Jobsearcher -- main entry point.
 
 Usage:
-    python src/main.py --manual         # Run full pipeline once
-    python src/main.py --scrape-only    # Just scrape and filter, no LLM
-    python src/main.py --test-email     # Generate test digest from last scrape
+    python src/main.py --manual         # Full pipeline: scrape + filter + prerank + LLM + email
+    python src/main.py --scrape-only    # Scrape + filter only, no prerank, no LLM
+    python src/main.py --no-score       # Scrape + filter + prerank + digest, skip LLM (saves quota)
+    python src/main.py --rerank-only    # Re-apply prerank to cached enriched jobs, skip scrape + LLM
 """
 
 import argparse
 import os
 import sys
 import time
+
+# Force UTF-8 stdout so Traditional Chinese from LLM doesn't crash on Windows cp1252.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from dotenv import load_dotenv
 
@@ -23,11 +29,65 @@ from src.filters import enrich_and_filter, language_prefilter
 from src.matcher import score_all_jobs
 from src.travel import enrich_with_travel_time
 from src.sheets import append_jobs
-from src.notifier import send_email
+from src.notifier import send_email, build_prerank_digest
 from src.feedback import sync_verdicts_from_sheet, apply_weight_adjustments
+from src.prerank import apply_prerank, split_by_prerank
+
+ENRICHED_CACHE_PATH = "output/enriched_jobs.pkl"
 
 
-def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
+def _save_enriched_cache(df):
+    """Persist enriched DataFrame so --rerank-only can replay without scraping."""
+    try:
+        os.makedirs("output", exist_ok=True)
+        df.to_pickle(ENRICHED_CACHE_PATH)
+        print(f"  Cached enriched jobs -> {ENRICHED_CACHE_PATH}")
+    except Exception as e:
+        print(f"  [warn] Could not write enriched cache: {e}")
+
+
+def _load_enriched_cache():
+    import pandas as pd
+    if not os.path.exists(ENRICHED_CACHE_PATH):
+        return None
+    try:
+        return pd.read_pickle(ENRICHED_CACHE_PATH)
+    except Exception as e:
+        print(f"  [warn] Could not read enriched cache: {e}")
+        return None
+
+
+def run_rerank_only():
+    """Re-apply pre-rank to the cached enriched DataFrame. No scrape, no LLM."""
+    print("=" * 60)
+    print("JOBSEARCHER [RERANK-ONLY] — reading cached enriched jobs")
+    print("=" * 60)
+
+    df = _load_enriched_cache()
+    if df is None or df.empty:
+        print(f"No cache at {ENRICHED_CACHE_PATH}. Run --no-score or --manual first.")
+        return
+
+    print(f"Loaded {len(df)} cached jobs.")
+    ranked = apply_prerank(df)
+    _print_prerank_summary(ranked)
+
+    output_path = build_prerank_digest(ranked)
+    print(f"Digest: {output_path}")
+
+
+def _print_prerank_summary(ranked, top_n=None):
+    print("\n--- Pre-rank results ---")
+    limit = top_n if top_n else len(ranked)
+    for i, row in ranked.head(limit).iterrows():
+        score = int(row.get("prerank_score", 0))
+        title = str(row.get("title", "?"))[:50]
+        company = str(row.get("company", "?"))[:25]
+        reasons = str(row.get("prerank_reasons", ""))[:80]
+        print(f"  {score:+4d}  {title:<50}  @ {company:<25}  [{reasons}]")
+
+
+def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_score=False):
     """Run the full job search pipeline."""
     print("=" * 60)
     label = "JOBSEARCHER PIPELINE"
@@ -99,6 +159,9 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
     jobs = enrich_with_travel_time(jobs, origin, arrival)
     print(f"  -> {time.time() - t0:.0f}s")
 
+    # Cache enriched jobs so --rerank-only can replay without scraping
+    _save_enriched_cache(jobs)
+
     if scrape_only:
         print(f"\n[Scrape-only] {len(jobs)} jobs after filtering:")
         cols = ["title", "company", "work_mode", "phygital_detected", "driver_license_flagged", "dutch_mandatory"]
@@ -109,11 +172,32 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
         print("Saved to output/scrape_results.csv")
         return
 
-    # Step 5: LLM scoring
+    # Step 4.5: Pre-rank — cheap, rule-based scoring before the LLM
+    print("\n[4.5/7] Applying pre-rank (rule-based, no LLM)...")
     t0 = time.time()
-    if max_jobs:
-        jobs = jobs.head(max_jobs)
-        print(f"\n[5/7] Scoring {len(jobs)} jobs with LLM (capped at {max_jobs})...")
+    jobs = apply_prerank(jobs)
+    _print_prerank_summary(jobs, top_n=min(20, len(jobs)))
+    print(f"  -> {time.time() - t0:.0f}s")
+
+    if no_score:
+        print(f"\n[no-score] Skipping LLM. Building pre-rank digest...")
+        output_path = build_prerank_digest(jobs)
+        print(f"Digest: {output_path}")
+        print(f"Total pipeline time: {time.time() - pipeline_start:.0f}s")
+        return
+
+    # Step 5: LLM scoring — selects top N by pre-rank, not first N
+    t0 = time.time()
+    if max_jobs and len(jobs) > max_jobs:
+        kept, dropped = split_by_prerank(jobs, max_jobs)
+        jobs = kept
+        print(f"\n[5/7] Scoring top {len(jobs)} by pre-rank with LLM ({len(dropped)} below threshold)...")
+        if len(dropped):
+            print(f"  Below pre-rank threshold (not LLM-scored):")
+            for _, row in dropped.head(15).iterrows():
+                print(f"    {int(row.get('prerank_score', 0)):+4d}  {str(row.get('title', '?'))[:50]} @ {str(row.get('company', '?'))[:25]}")
+            if len(dropped) > 15:
+                print(f"    ... and {len(dropped) - 15} more")
     else:
         print("\n[5/7] Scoring with LLM (Phygital-weighted framework)...")
     jobs = score_all_jobs(jobs, min_score=min_score)
@@ -171,14 +255,24 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Jobsearcher")
-    parser.add_argument("--manual", action="store_true", help="Run full pipeline")
-    parser.add_argument("--scrape-only", action="store_true", help="Scrape + filter only, no LLM")
+    parser.add_argument("--manual", action="store_true", help="Run full pipeline (scrape + filter + prerank + LLM + email)")
+    parser.add_argument("--scrape-only", action="store_true", help="Scrape + filter only, no prerank, no LLM")
+    parser.add_argument("--no-score", action="store_true", help="Scrape + filter + prerank + digest, skip LLM entirely")
+    parser.add_argument("--rerank-only", action="store_true", help="Re-apply prerank to cached enriched jobs (no scrape, no LLM)")
     parser.add_argument("--min-score", type=int, default=0, help="Minimum match score to include")
     parser.add_argument("--quick", action="store_true", help="Quick test: primary keywords only")
-    parser.add_argument("--max-jobs", type=int, default=0, help="Max jobs to score (0 = all)")
+    parser.add_argument("--max-jobs", type=int, default=0, help="Max jobs to LLM-score (top N by pre-rank)")
     args = parser.parse_args()
 
-    if args.manual or args.scrape_only:
-        run_pipeline(scrape_only=args.scrape_only, min_score=args.min_score, quick=args.quick, max_jobs=args.max_jobs)
+    if args.rerank_only:
+        run_rerank_only()
+    elif args.manual or args.scrape_only or args.no_score:
+        run_pipeline(
+            scrape_only=args.scrape_only,
+            min_score=args.min_score,
+            quick=args.quick,
+            max_jobs=args.max_jobs,
+            no_score=args.no_score,
+        )
     else:
-        print("Use --manual to run the pipeline or --scrape-only for scraping only.")
+        print("Use --manual, --no-score, --rerank-only, or --scrape-only.")

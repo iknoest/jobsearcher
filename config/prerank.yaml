@@ -1,0 +1,62 @@
+# Pre-rank configuration — cheap, rule-based scoring applied BEFORE the LLM.
+# Purpose: spend scarce LLM quota only on jobs that already look plausible.
+#
+# How it works:
+#   pre-rank runs right after enrichment, uses only detected flags + title text.
+#   Each job gets a score from the rules below; the top N are passed to the LLM.
+#   No LLM calls here — editing this file is instant and free.
+#
+# Edit freely. All values are additive. Missing keys are ignored.
+
+# --- Flag-based weights (applied to enrichment columns) ---
+flag_weights:
+  phygital_detected: 30          # strong bonus: physical product + digital integration
+  pure_saas_detected: -25        # demote pure-software roles (CRM/ERP/generic fintech)
+  driver_license_flagged: -15    # demote; not blocked because jobs still worth seeing
+  dutch_nice_to_have: -5         # mild demote for "Dutch preferred" jobs
+
+# --- Title keyword bonuses (case-insensitive, substring match) ---
+title_bonus:
+  "research": 10
+  "innovation": 10
+  "engineer": 10
+  "prototype": 10
+  "prototyping": 10
+  "product": 10
+  "senior": 10
+  "lead": 10
+
+# --- Title keyword penalties ---
+title_penalty:
+  "software": -20
+
+# --- Preferred companies (case-insensitive, substring match on company name) ---
+# Companies you'd happily work at — gets a strong bonus regardless of title.
+preferred_companies:
+  "ikea": 25
+  "philips": 25
+  "asml": 20
+  "signify": 20
+  "tomtom": 20
+  "booking": 15
+  "adyen": 15
+
+# --- Demoted companies ---
+# Recruiters, obvious mismatches, or places you've ruled out.
+demoted_companies: {}
+  # "example bad corp": -30
+
+# --- Preferred industries (checked against description text) ---
+# Placeholder for future skill/industry matching. Currently unused — reserved so
+# the rest of the pipeline stays stable when you start populating it.
+industry_bonus: {}
+  # "automotive": 15
+  # "robotics": 20
+  # "consumer electronics": 15
+
+# --- Skill bonuses (checked against description text, case-insensitive) ---
+# Placeholder for future use. Start small and expand as you learn what matters.
+skill_bonus: {}
+  # "jira": 5
+  # "python": 5
+  # "figma": 5

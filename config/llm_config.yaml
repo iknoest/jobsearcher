@@ -1,38 +1,74 @@
 # Multi-LLM rotation config
-# The system tries models in priority order; if rate-limited, falls back to next
+# The system tries models in priority order (lower = higher priority);
+# if rate-limited or quota exhausted, falls back to next.
+#
+# Provider types:
+#   google   — uses google-genai SDK
+#   openai_compat — uses OpenAI SDK with custom base_url (NVIDIA, Groq, etc.)
+#   openrouter — uses OpenAI SDK at openrouter.ai with free-model rotation
+#   anthropic — uses anthropic SDK
+#   openai   — uses OpenAI SDK at api.openai.com
 
 models:
+  gemini:
+    provider: google
+    model: gemini-2.5-flash
+    env_key: GOOGLE_GEMINI_API_KEY
+    priority: 1
+    daily_quota: 500
+    reset_hour_utc: 0
+
+  groq:
+    provider: openai_compat
+    model: llama-3.3-70b-versatile
+    api_base: https://api.groq.com/openai/v1
+    env_key: GROQ_API_KEY
+    priority: 1
+    daily_quota: 500
+    reset_hour_utc: 0
+
+  nvidia:
+    provider: openai_compat
+    model: nvidia/llama-3.3-nemotron-super-49b-v1
+    api_base: https://integrate.api.nvidia.com/v1
+    env_key: NVIDIA_API_KEY
+    priority: 2
+    daily_quota: 500
+    reset_hour_utc: 0
+
+  mistral:
+    provider: openai_compat
+    model: mistral-small-latest
+    api_base: https://api.mistral.ai/v1
+    env_key: MISTRAL_API_KEY
+    priority: 2
+    daily_quota: 500
+    reset_hour_utc: 0
+
   openrouter:
     provider: openrouter
     model: qwen/qwen3-next-80b-a3b-instruct:free
     env_key: OPENROUTER_API_KEY
-    priority: 1
-    daily_quota: 200
-    reset_hour_utc: 0
-
-  gemini:
-    provider: google
-    model: gemini-2.0-flash
-    env_key: GOOGLE_GEMINI_API_KEY
-    priority: 1
-    daily_quota: 1500
-    reset_hour_utc: 0
-
-  claude:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
-    env_key: ANTHROPIC_API_KEY
-    priority: 2
-    daily_quota: 100
-    reset_hour_utc: 0
-
-  chatgpt:
-    provider: openai
-    model: gpt-4o-mini
-    env_key: OPENAI_API_KEY
     priority: 3
     daily_quota: 200
     reset_hour_utc: 0
+
+# Uncomment when you have real API keys:
+#  claude:
+#    provider: anthropic
+#    model: claude-sonnet-4-20250514
+#    env_key: ANTHROPIC_API_KEY
+#    priority: 4
+#    daily_quota: 100
+#    reset_hour_utc: 0
+#
+#  chatgpt:
+#    provider: openai
+#    model: gpt-4o-mini
+#    env_key: OPENAI_API_KEY
+#    priority: 5
+#    daily_quota: 200
+#    reset_hour_utc: 0
 
 # Fallback behavior
 fallback_strategy: "round_robin"  # or "priority" (always try highest first)

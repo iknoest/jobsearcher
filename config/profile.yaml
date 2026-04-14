@@ -1,0 +1,59 @@
+name: Ava Tse
+location: Hoofddorp, Netherlands
+home_station: Hoofddorp
+arrival_time: "09:00"
+
+languages_spoken:
+  - English
+  - Chinese (Mandarin)
+  - Cantonese
+
+languages_not_spoken:
+  - Dutch
+  - German
+  - French
+
+visa_status: "No sponsorship required"
+driving_licence: false
+years_experience: 8
+
+education:
+  - degree: MSc Applied Cognitive Psychology
+    university: Utrecht University
+  - degree: BEng Mechanical Engineering
+    university: Hong Kong Polytechnic University
+
+experience_summary: |
+  8+ years across consumer electronics, automotive, IoT, and data.
+  Roles: Product Researcher, Data Viz Engineer, UX Researcher, R&D Engineer, Project Engineer.
+  Companies: BYD Europe, TomTom, Syntegon, DFO Global, Raymond Industrial, Jetta Company.
+  Strengths: product management, user research, cognitive psychology, Python/SQL/PowerBI,
+  3D CAD, sensor integration, cross-functional team leadership, Asia-Europe collaboration.
+
+core_skills:
+  product_management:
+    - Product Vision & Roadmap
+    - Backlog Prioritization (Jira/Agile)
+    - Technical PRD Definition
+    - MVP Development
+    - Stakeholder Influence
+    - GTM Strategy
+  research_insights:
+    - Cognitive Psychology
+    - Qualitative & Quantitative Research
+    - User Journey Mapping
+    - Voice of Consumer (VOC)
+    - Market & Competitive Intelligence
+  technical:
+    - Python & SQL
+    - Power BI
+    - Machine Learning & Computer Vision (YOLO/OpenCV)
+    - 3D CAD (SolidWorks/Creo)
+    - Figma & Miro
+    - Raspberry Pi & Arduino
+    - Sensor Integration (ToF/Wireless)
+
+certifications:
+  - Microsoft Power BI Data Analyst
+  - Google UX Design Professional
+  - Certificate in Data Mining & Machine Learning (CUHK)

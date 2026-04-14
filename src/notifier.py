@@ -22,6 +22,15 @@ load_dotenv()
 import re as _re
 import urllib.parse as _urlparse
 
+def _format_job_type(job_type):
+    """Return a display label for non-fulltime contract types, empty string otherwise."""
+    if not job_type:
+        return ""
+    jt = str(job_type).lower().strip()
+    labels = {"contract": "Contract", "parttime": "Part-time", "temporary": "Temporary", "internship": "Internship"}
+    return labels.get(jt, "")  # "fulltime" → empty, unknown → empty
+
+
 def _job_id_from_url(url):
     """Extract a short job ID from a job URL.
     LinkedIn: https://www.linkedin.com/jobs/view/4400368636 -> '4400368636'
@@ -73,9 +82,9 @@ EMAIL_TEMPLATE = """
   /* Blocking alert */
   .blocking { background: #fce8e6; color: #c5221f; font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 8px; margin-top: 8px; }
 
-  /* Signal chips */
-  .signals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .chip { font-size: 11px; padding: 3px 9px; border-radius: 8px; white-space: nowrap; }
+  /* Signal chips — inline-block for Outlook compatibility (no flex) */
+  .signals { margin-top: 8px; line-height: 1.9; }
+  .chip { display: inline-block; margin: 2px 3px 2px 0; font-size: 11px; padding: 3px 9px; border-radius: 8px; white-space: nowrap; }
   .c-green { background: #e8f8ec; color: #1b7a2d; }
   .c-red { background: #fce8e6; color: #c5221f; }
   .c-amber { background: #fff3e0; color: #b36b00; }
@@ -116,8 +125,8 @@ EMAIL_TEMPLATE = """
   .co-item span { font-weight: 600; color: #86868b; }
 
   /* Score drivers */
-  .drivers { display: flex; flex-wrap: wrap; gap: 4px; }
-  .drv { font-size: 10px; padding: 2px 7px; border-radius: 5px; }
+  .drivers { line-height: 1.9; }
+  .drv { display: inline-block; margin: 2px 3px 2px 0; font-size: 10px; padding: 2px 7px; border-radius: 5px; }
   .drv-pos { background: #e8f8ec; color: #1b7a2d; }
   .drv-neg { background: #fce8e6; color: #c5221f; }
 
@@ -126,19 +135,15 @@ EMAIL_TEMPLATE = """
   .trust .conf { font-weight: 600; }
   .trust .missing { font-style: italic; }
 
-  /* Skill chips */
-  .skill-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 2px; }
-  .skill-chip { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+  /* Skill chips — inline-block for Outlook compatibility */
+  .skill-chips { margin: 6px 0 2px; line-height: 1.9; }
+  .skill-chip { display: inline-block; margin: 2px 3px 2px 0; font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
   .skill-match { background: #e8f8ec; color: #1b7a2d; }
   .skill-gap { background: #fce8e6; color: #c5221f; }
   .skill-neutral { background: #f0f0f5; color: #515154; }
 
-  /* Action buttons */
-  .action-btns { display: flex; gap: 8px; margin-top: 10px; }
+  /* Action buttons — table-based for Outlook; CSS classes kept for web preview only */
   .btn { display: inline-block; padding: 7px 18px; border-radius: 8px; text-decoration: none; font-size: 12px; font-weight: 600; text-align: center; }
-  .btn-view { background: #f0f0f5; color: #1d1d1f; }
-  .btn-apply { background: #34c759; color: #fff; }
-  .btn-skip { background: #f0f0f5; color: #86868b; }
 
   /* No matches */
   .empty { text-align: center; padding: 40px 20px; color: #86868b; }
@@ -196,14 +201,15 @@ EMAIL_TEMPLATE = """
     {% endif %}
 
     <div class="signals">
+      {% if j.job_type %}<span class="chip c-purple">{{ j.job_type }}</span> {% endif %}
       <span class="chip c-gray">{{ j.work_mode }}</span>
-      {% if j.salary != 'Unknown' %}<span class="chip c-green">{{ j.salary }}</span>{% endif %}
-      {% if j.commute != 'Unknown' %}<span class="chip c-gray">{{ j.commute }}</span>{% endif %}
+      {% if j.salary != 'Unknown' %} <span class="chip c-green">{{ j.salary }}</span>{% endif %}
+      {% if j.commute != 'Unknown' %} <span class="chip c-gray">{{ j.commute }}</span>{% endif %}
       <span class="chip {% if j.lang_class == 'ok' %}c-green{% elif j.lang_class == 'risk' %}c-red{% else %}c-amber{% endif %}">{{ j.language }}</span>
-      {% if j.phygital_level == 'Strong' %}<span class="chip c-blue">Phygital</span>{% elif j.phygital_level == 'Moderate' %}<span class="chip c-amber">Phygital-adj</span>{% endif %}
-      {% if j.km_visa %}<span class="chip c-green">KM Visa</span>{% endif %}
-      {% if j.is_agency %}<span class="chip c-gray">Agency</span>{% endif %}
-      {% if j.driver_flagged %}<span class="chip c-amber">Driving Licence</span>{% endif %}
+      {% if j.phygital_level == 'Strong' %} <span class="chip c-blue">Phygital</span>{% elif j.phygital_level == 'Moderate' %} <span class="chip c-amber">Phygital-adj</span>{% endif %}
+      {% if j.km_visa %} <span class="chip c-green">KM Visa</span>{% endif %}
+      {% if j.is_agency %} <span class="chip c-gray">Agency</span>{% endif %}
+      {% if j.driver_flagged %} <span class="chip c-amber">Driving Licence</span>{% endif %}
     </div>
 
     {% if j.main_risk %}
@@ -212,7 +218,7 @@ EMAIL_TEMPLATE = """
 
     {% if j.key_skills %}
     <div class="skill-chips">
-      {% for sk in j.key_skills %}<span class="skill-chip skill-neutral">{{ sk }}</span>{% endfor %}
+      {% for sk in j.key_skills %}<span class="skill-chip skill-neutral">{{ sk }}</span> {% endfor %}
     </div>
     {% endif %}
   </div>
@@ -283,11 +289,11 @@ EMAIL_TEMPLATE = """
       {% if j.missing_info %}<span class="missing"> · Missing: {{ j.missing_info | join(', ') }}</span>{% endif %}
     </div>
 
-    <div class="action-btns">
-      <a href="{{ j.job_url }}" class="btn btn-view">View</a>
-      <a href="http://localhost:5000/tailor/{{ j.job_id }}" class="btn btn-apply">Apply</a>
-      <a href="http://localhost:5000/skip/{{ j.job_id }}" class="btn btn-skip">Skip</a>
-    </div>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top: 10px;"><tr>
+      <td style="border-radius: 8px; background-color: #f0f0f5; padding-right: 6px;"><a href="{{ j.job_url }}" style="display: inline-block; padding: 7px 18px; color: #1d1d1f; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">View</a></td>
+      <td style="border-radius: 8px; background-color: #34c759; padding-right: 6px;"><a href="http://localhost:5000/tailor/{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #fff; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #34c759;">Apply</a></td>
+      <td style="border-radius: 8px; background-color: #f0f0f5;"><a href="http://localhost:5000/skip/{{ j.job_id }}" style="display: inline-block; padding: 7px 18px; color: #86868b; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 8px; background-color: #f0f0f5;">Skip</a></td>
+    </tr></table>
   </div>
 </div>
 {% endfor %}
@@ -338,6 +344,7 @@ def _parse_card(row):
         "industry": co.get("Industry", ""),
         "job_url": row.get("job_url", "#"),
         "job_id": _job_id_from_url(row.get("job_url", "")),
+        "job_type": _format_job_type(row.get("job_type", "")),
         "score": score,
         "hint": hint,
         "decision_class": hint.lower(),
