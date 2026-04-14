@@ -1,4 +1,10 @@
-"""Google Sheets integration — store jobs, track applications, sync feedback."""
+"""Google Sheets integration — store jobs, track applications, sync feedback.
+
+Tabs:
+  Jobs   — main scored job store (32 columns)
+  Inbox  — drop a URL or raw JD; pipeline picks up Pending rows on next run
+  Rules  — dynamic weight/keyword overrides; human-editable + Telegram-writable
+"""
 
 import os
 import json
@@ -154,6 +160,176 @@ def append_jobs(df, spreadsheet_id, sheet_name="Jobs"):
         print("No new jobs to add (all duplicates)")
 
     return len(new_rows)
+
+
+INBOX_HEADERS = [
+    "URL", "Raw JD", "Title", "Company", "Status",
+    "Date Added", "Score", "Decision",
+]
+
+RULES_HEADERS = [
+    "Type", "Value", "Delta", "Active", "Note",
+]
+
+
+def setup_tabs(spreadsheet_id):
+    """Create Inbox and Rules tabs if they don't exist. Safe to call on every run."""
+    try:
+        client = get_client()
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        existing = {ws.title for ws in spreadsheet.worksheets()}
+
+        if "Inbox" not in existing:
+            ws = spreadsheet.add_worksheet(title="Inbox", rows=200, cols=len(INBOX_HEADERS))
+            ws.update("A1", [INBOX_HEADERS])
+            print("  Created Inbox tab in Google Sheets")
+
+        if "Rules" not in existing:
+            ws = spreadsheet.add_worksheet(title="Rules", rows=100, cols=len(RULES_HEADERS))
+            ws.update("A1", [RULES_HEADERS])
+            # Seed with example rows (commented-out format so user knows the schema)
+            ws.update("A2", [
+                ["weight_adjust", "phygital", "+10", "FALSE", "Example: boost Phygital score by 10"],
+                ["keyword_block", "salesforce", "", "FALSE", "Example: hard-reject any JD mentioning this"],
+                ["keyword_add", "Hardware Engineer", "", "FALSE", "Example: add search keyword next run"],
+                ["company_boost", "ASML", "+20", "FALSE", "Example: boost ASML jobs by 20 pre-rank pts"],
+                ["company_demote", "Randstad", "-30", "FALSE", "Example: demote agency by 30 pre-rank pts"],
+            ])
+            print("  Created Rules tab in Google Sheets (with example rows)")
+    except Exception as e:
+        print(f"  [warn] setup_tabs failed: {e}")
+
+
+def poll_inbox(spreadsheet_id):
+    """Read Pending rows from Inbox tab. Returns list of job dicts ready for scoring.
+
+    Each dict has: url, raw_jd, title, company, description (resolved), _inbox_row (row index).
+    Caller is responsible for marking rows Scored/Error via update_inbox_status().
+    """
+    try:
+        client = get_client()
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        try:
+            ws = spreadsheet.worksheet("Inbox")
+        except gspread.WorksheetNotFound:
+            return []
+
+        records = ws.get_all_records()
+        pending = []
+        for i, row in enumerate(records, start=2):  # row 1 = header
+            status = str(row.get("Status", "")).strip()
+            if status.lower() != "pending":
+                continue
+            url = str(row.get("URL", "")).strip()
+            raw_jd = str(row.get("Raw JD", "")).strip()
+            title = str(row.get("Title", "")).strip() or "Unknown"
+            company = str(row.get("Company", "")).strip() or "Unknown"
+
+            description = raw_jd
+            if not description and url:
+                try:
+                    import trafilatura
+                    downloaded = trafilatura.fetch_url(url)
+                    if downloaded:
+                        description = trafilatura.extract(downloaded) or ""
+                except Exception:
+                    pass
+
+            if not description:
+                print(f"  [Inbox row {i}] No description available — skipping")
+                continue
+
+            pending.append({
+                "job_url": url or f"inbox://row{i}",
+                "description": description,
+                "title": title,
+                "company": company,
+                "location": "Unknown",
+                "work_mode": "Unknown",
+                "salary_info": "",
+                "job_type": "",
+                "is_remote": None,
+                "search_keyword": "inbox",
+                "_inbox_row": i,
+            })
+        if pending:
+            print(f"  Inbox: {len(pending)} Pending job(s) to score")
+        return pending
+    except Exception as e:
+        print(f"  [warn] poll_inbox failed: {e}")
+        return []
+
+
+def update_inbox_status(spreadsheet_id, row_index, status, score="", decision=""):
+    """Update Status (and optionally Score/Decision) for an Inbox row."""
+    try:
+        client = get_client()
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        ws = spreadsheet.worksheet("Inbox")
+        # Columns: URL=1, Raw JD=2, Title=3, Company=4, Status=5, Date Added=6, Score=7, Decision=8
+        ws.update(f"E{row_index}", [[status]])
+        if score or decision:
+            ws.update(f"G{row_index}", [[str(score), str(decision)]])
+    except Exception as e:
+        print(f"  [warn] update_inbox_status failed: {e}")
+
+
+def read_rules(spreadsheet_id):
+    """Read active rows from Rules tab. Returns structured override dict.
+
+    Keys:
+      weight_adjustments  — {dimension: delta_int}
+      keyword_blocks      — [str]
+      keyword_adds        — [str]
+      company_boosts      — {name: delta_int}
+      company_demotes     — {name: delta_int}
+    """
+    result = {
+        "weight_adjustments": {},
+        "keyword_blocks": [],
+        "keyword_adds": [],
+        "company_boosts": {},
+        "company_demotes": {},
+    }
+    try:
+        client = get_client()
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        try:
+            ws = spreadsheet.worksheet("Rules")
+        except gspread.WorksheetNotFound:
+            return result
+
+        for row in ws.get_all_records():
+            active = str(row.get("Active", "")).strip().upper()
+            if active not in ("TRUE", "1", "YES"):
+                continue
+            rule_type = str(row.get("Type", "")).strip().lower()
+            value = str(row.get("Value", "")).strip()
+            delta_raw = str(row.get("Delta", "")).strip()
+
+            try:
+                delta = int(delta_raw) if delta_raw else 0
+            except ValueError:
+                delta = 0
+
+            if rule_type == "weight_adjust" and value:
+                result["weight_adjustments"][value] = delta
+            elif rule_type == "keyword_block" and value:
+                result["keyword_blocks"].append(value.lower())
+            elif rule_type == "keyword_add" and value:
+                result["keyword_adds"].append(value)
+            elif rule_type == "company_boost" and value:
+                result["company_boosts"][value.lower()] = delta
+            elif rule_type == "company_demote" and value:
+                result["company_demotes"][value.lower()] = delta
+
+        active_count = sum(len(v) if isinstance(v, (list, dict)) else 1
+                           for v in result.values() if v)
+        if active_count:
+            print(f"  Rules tab: {active_count} active rule(s) loaded")
+    except Exception as e:
+        print(f"  [warn] read_rules failed: {e}")
+    return result
 
 
 def sync_feedback_from_sheet(spreadsheet_id, feedback_path="config/feedback_log.json", sheet_name="Jobs"):

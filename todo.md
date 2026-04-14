@@ -75,11 +75,15 @@
 - [x] Create `lessons.md` and migrate lessons out of `CLAUDE.md`
 - [x] Add `lessons.md` to auto-update rule
 
-## Phase B: Sheets schema
-- [ ] Add `Inbox` tab (you drop URLs or raw JD text; next run picks up & scores)
-- [ ] Add `Rules` tab (dynamic weight adjustments + keyword blocks/adds; human-editable)
-- [ ] Add `Confidence` column to `Jobs` (High/Med/Low from LLM)
-- [ ] Teach scoring prompt to set Confidence explicitly
+## Phase B: Sheets schema (completed 2026-04-15)
+- [x] Add `Inbox` tab (drop URLs or raw JD text; pipeline picks up Pending rows on next run)
+- [x] Add `Rules` tab (dynamic weight/keyword/company overrides; human-editable + TG-writable)
+- [x] Add `Confidence` column to `Jobs` (High/Med/Low from LLM)
+- [x] Teach scoring prompt to set Confidence explicitly (TrustNotes.Confidence field)
+- [x] `setup_tabs()` — creates tabs lazily on every run; seeds Rules with example rows
+- [x] `poll_inbox()` — reads Pending rows, scrapes URLs via trafilatura if no Raw JD
+- [x] `read_rules()` — merges sheet-based weight_adjustments with learned ones
+- [x] Inbox jobs flow through full pipeline (filter → prerank → LLM → Sheets); rows marked Scored on completion
 
 ## Phase C: Telegram bot
 - [ ] Dedicated jobsearcher bot (separate token from the existing `plugin:telegram` bot)

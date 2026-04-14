@@ -28,7 +28,7 @@ from src.scraper import scrape_all_keywords
 from src.filters import enrich_and_filter, language_prefilter
 from src.matcher import score_all_jobs
 from src.travel import enrich_with_travel_time
-from src.sheets import append_jobs
+from src.sheets import append_jobs, setup_tabs, poll_inbox, update_inbox_status, read_rules
 from src.notifier import send_email, build_prerank_digest
 from src.feedback import sync_verdicts_from_sheet, apply_weight_adjustments
 from src.prerank import apply_prerank, split_by_prerank
@@ -99,12 +99,18 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
     print("=" * 60)
     pipeline_start = time.time()
 
-    # Step 0: Sync feedback from Sheet + apply learned adjustments
+    # Step 0: Sync feedback from Sheet + apply learned adjustments + setup tabs
     spreadsheet_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
+    sheet_rules = {"weight_adjustments": {}, "keyword_blocks": [], "keyword_adds": [],
+                   "company_boosts": {}, "company_demotes": {}}
     if spreadsheet_id:
-        print("\n[0/7] Syncing feedback...")
+        print("\n[0/7] Syncing feedback + reading rules...")
+        setup_tabs(spreadsheet_id)
         sync_verdicts_from_sheet(spreadsheet_id)
+        sheet_rules = read_rules(spreadsheet_id)
     weight_adjustments = apply_weight_adjustments()
+    # Merge sheet-based weight adjustments on top of learned ones
+    weight_adjustments.update(sheet_rules["weight_adjustments"])
     if weight_adjustments:
         print(f"  Active weight adjustments: {weight_adjustments}")
 
@@ -121,6 +127,15 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         print(f"\n  Jobs per keyword (before dedup):")
         for kw, count in sorted(keyword_counts.items(), key=lambda x: -x[1]):
             print(f"    {kw}: {count}")
+
+    # Merge Inbox jobs into the pipeline
+    if spreadsheet_id and not scrape_only:
+        import pandas as pd
+        inbox_jobs = poll_inbox(spreadsheet_id)
+        if inbox_jobs:
+            inbox_df = pd.DataFrame(inbox_jobs)
+            jobs = pd.concat([jobs, inbox_df], ignore_index=True)
+
     total_scraped = len(jobs)
 
     # Step 2: Language pre-filter (hard reject Dutch-mandatory jobs)
@@ -205,6 +220,17 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
     if jobs.empty:
         print("No jobs scored. Exiting.")
         return
+
+    # Mark Inbox rows as Scored
+    if spreadsheet_id and "_inbox_row" in jobs.columns:
+        for _, row in jobs[jobs["_inbox_row"].notna()].iterrows():
+            update_inbox_status(
+                spreadsheet_id,
+                int(row["_inbox_row"]),
+                "Scored",
+                score=row.get("match_score", ""),
+                decision=row.get("decision_hint", ""),
+            )
 
     # Print quick summary
     print("\n--- Results ---")
