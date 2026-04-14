@@ -104,10 +104,15 @@
 - [x] `TG_BOT_USERNAME` env var enables TG buttons; falls back to View-only if not set
 - [x] Uncertain card styled in grey, section-label header, shows missing info prominently
 
-## Phase E: Learning tweaks
-- [ ] 1-sample weight nudge by default (±3 pts)
-- [ ] Auto-pattern detection across 3 similar verdicts (±8 pts + TG notify)
-- [ ] `/wait <pattern>` freeze + `/ok <pattern>` unfreeze
+## Phase E: Learning tweaks (completed 2026-04-15)
+- [x] 1-sample nudge: ±3 pts from first verdict in any direction (immediate, no waiting)
+- [x] Pattern detection: threshold 3 (was 5), pattern bonus ±8 pts on top of nudge
+- [x] TG notification when pattern first crosses threshold — drains pending_notifications.json on bot startup
+- [x] `/wait <pattern>` freeze — writes to Rules tab, feedback.py respects it via frozen_patterns param
+- [x] `/ok <pattern>` unfreeze — deactivates wait row in Rules tab
+- [x] Adjustments computed dynamically from active verdicts (not accumulated in storage)
+- [x] frozen_patterns plumbed: read_rules() → main.py → apply_weight_adjustments()
+- [x] 7 feedback tests (replaced 3 old threshold tests with 6 covering nudge/bonus/freeze)
 
 ## Phase F: Ad-hoc scoring
 - [ ] `Inbox` tab poller integrated into pipeline

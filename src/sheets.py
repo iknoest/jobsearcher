@@ -283,6 +283,7 @@ def read_rules(spreadsheet_id):
       keyword_adds        — [str]
       company_boosts      — {name: delta_int}
       company_demotes     — {name: delta_int}
+      frozen_patterns     — [str]  (from 'wait' type rows — freeze learning)
     """
     result = {
         "weight_adjustments": {},
@@ -290,6 +291,7 @@ def read_rules(spreadsheet_id):
         "keyword_adds": [],
         "company_boosts": {},
         "company_demotes": {},
+        "frozen_patterns": [],
     }
     try:
         client = get_client()
@@ -322,6 +324,8 @@ def read_rules(spreadsheet_id):
                 result["company_boosts"][value.lower()] = delta
             elif rule_type == "company_demote" and value:
                 result["company_demotes"][value.lower()] = delta
+            elif rule_type == "wait" and value:
+                result["frozen_patterns"].append(value.lower())
 
         active_count = sum(len(v) if isinstance(v, (list, dict)) else 1
                            for v in result.values() if v)

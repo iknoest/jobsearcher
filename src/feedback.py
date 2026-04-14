@@ -1,4 +1,11 @@
-"""Two-way feedback loop — sync user verdicts, detect patterns, adjust weights."""
+"""Two-way feedback loop — sync user verdicts, detect patterns, adjust weights.
+
+Adjustment tiers:
+  Nudge (1+ verdicts)   — ±NUDGE_STEP pts (immediate, from first signal)
+  Pattern (3+ verdicts) — ±PATTERN_STEP pts additional (auto-detected, TG notified)
+
+Frozen patterns (from /wait command → Rules tab) are skipped by detect_patterns.
+"""
 
 import json
 import re
@@ -6,12 +13,20 @@ from datetime import datetime
 from pathlib import Path
 
 FEEDBACK_PATH = Path("config/feedback_log.json")
+NOTIFICATIONS_PATH = Path("config/pending_notifications.json")
 
-_SAAS_KEYWORDS = re.compile(r"\b(saas|software only|pure software|cloud platform|no hardware)\b", re.IGNORECASE)
-_PHYGITAL_KEYWORDS = re.compile(r"\b(hardware|phygital|physical|iot|sensor|device|robot|automotive|mechatronic)\b", re.IGNORECASE)
+_SAAS_KEYWORDS = re.compile(
+    r"\b(saas|software only|pure software|cloud platform|no hardware|b2b software|enterprise software)\b",
+    re.IGNORECASE,
+)
+_PHYGITAL_KEYWORDS = re.compile(
+    r"\b(hardware|phygital|physical|iot|sensor|device|robot|automotive|mechatronic|embedded|product)\b",
+    re.IGNORECASE,
+)
 
-PATTERN_THRESHOLD = 5
-ADJUSTMENT_STEP = 5
+PATTERN_THRESHOLD = 3   # verdicts before pattern bonus kicks in (was 5)
+NUDGE_STEP = 3          # pts per verdict (1-sample nudge)
+PATTERN_STEP = 8        # additional pts when threshold crossed
 
 
 def load_feedback(feedback_path=None):
@@ -27,8 +42,9 @@ def load_feedback(feedback_path=None):
     data.setdefault("positive_signals", [])
     data.setdefault("skipped_job_ids", [])
     data.setdefault("user_verdicts", [])
-    data.setdefault("weight_adjustments", [])
+    data.setdefault("weight_adjustments", [])  # legacy, kept for schema compat
     data.setdefault("pattern_counts", {})
+    data.setdefault("notified_milestones", [])  # {dim}:{count} already TG-notified
     return data
 
 
@@ -71,70 +87,149 @@ def get_active_verdicts(data):
     return [v for v in data.get("user_verdicts", []) if v.get("superseded_by") is None]
 
 
-def detect_patterns(verdicts):
-    """Detect recurring patterns in user disagreements.
-    Returns dict of weight adjustments to apply.
+def _is_skip_signal(verdict):
+    v = verdict.lower()
+    return "skip" in v or "disagree-skip" in v
+
+
+def _is_good_signal(verdict):
+    v = verdict.lower()
+    return "good" in v or "apply" in v or "disagree-fit" in v
+
+
+def detect_patterns(verdicts, frozen_patterns=None):
+    """Compute weight adjustments from all active verdicts.
+
+    Returns {dimension: cumulative_delta}.
+
+    Nudge (±NUDGE_STEP) kicks in from the first signal.
+    Pattern bonus (±PATTERN_STEP) added when count >= PATTERN_THRESHOLD.
+    Frozen dimensions are skipped entirely.
     """
+    frozen = set(p.lower() for p in (frozen_patterns or []))
     adjustments = {}
 
-    saas_disagree_skip = 0
-    phygital_disagree_fit = 0
+    saas_skip_count = sum(
+        1 for v in verdicts
+        if _is_skip_signal(v.get("user_verdict", ""))
+        and _SAAS_KEYWORDS.search(v.get("user_reason", "") + " " + v.get("title", ""))
+    )
+    phygital_fit_count = sum(
+        1 for v in verdicts
+        if _is_good_signal(v.get("user_verdict", ""))
+        and _PHYGITAL_KEYWORDS.search(v.get("user_reason", "") + " " + v.get("title", ""))
+    )
 
-    for v in verdicts:
-        reason = v.get("user_reason", "")
-        verdict = v.get("user_verdict", "")
+    # SaaS: skip signals → increase penalty (negative delta)
+    if saas_skip_count > 0 and "saas" not in frozen:
+        delta = -NUDGE_STEP
+        if saas_skip_count >= PATTERN_THRESHOLD:
+            delta -= PATTERN_STEP
+        adjustments["saas_penalty_boost"] = delta
 
-        if verdict == "Disagree-Skip" and _SAAS_KEYWORDS.search(reason):
-            saas_disagree_skip += 1
-        elif verdict == "Disagree-Fit" and _PHYGITAL_KEYWORDS.search(reason):
-            phygital_disagree_fit += 1
-
-    if saas_disagree_skip >= PATTERN_THRESHOLD:
-        adjustments["saas_penalty_boost"] = -ADJUSTMENT_STEP
-    if phygital_disagree_fit >= PATTERN_THRESHOLD:
-        adjustments["phygital_bonus_boost"] = ADJUSTMENT_STEP
+    # Phygital: good signals → increase bonus (positive delta)
+    if phygital_fit_count > 0 and "phygital" not in frozen:
+        delta = NUDGE_STEP
+        if phygital_fit_count >= PATTERN_THRESHOLD:
+            delta += PATTERN_STEP
+        adjustments["phygital_bonus_boost"] = delta
 
     return adjustments
 
 
-def apply_weight_adjustments(feedback_path=None):
-    """Detect patterns from active verdicts and record any new weight adjustments.
-    Returns dict of current cumulative adjustments.
+def _queue_notification(message):
+    """Append a notification message to the pending queue for tg_bot.py to drain."""
+    try:
+        NOTIFICATIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(NOTIFICATIONS_PATH, "r", encoding="utf-8") as f:
+                queue = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            queue = []
+        queue.append({"message": message, "timestamp": datetime.now().isoformat()})
+        with open(NOTIFICATIONS_PATH, "w", encoding="utf-8") as f:
+            json.dump(queue, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # notifications are best-effort
+
+
+def apply_weight_adjustments(frozen_patterns=None, feedback_path=None):
+    """Compute weight adjustments from active verdicts. Returns {dimension: delta}.
+
+    Adjustments are computed fresh each call from all active verdicts — not
+    accumulated from a stored array. Pattern threshold crossings queue a TG
+    notification the first time they're detected.
     """
     data = load_feedback(feedback_path)
     active = get_active_verdicts(data)
-    new_adjustments = detect_patterns(active)
+    adjustments = detect_patterns(active, frozen_patterns)
 
-    existing_dims = {a["dimension"] for a in data.get("weight_adjustments", [])}
-    now = datetime.now().isoformat()
+    # Count signals to detect milestone crossings
+    saas_skip_count = sum(
+        1 for v in active
+        if _is_skip_signal(v.get("user_verdict", ""))
+        and _SAAS_KEYWORDS.search(v.get("user_reason", "") + " " + v.get("title", ""))
+    )
+    phygital_fit_count = sum(
+        1 for v in active
+        if _is_good_signal(v.get("user_verdict", ""))
+        and _PHYGITAL_KEYWORDS.search(v.get("user_reason", "") + " " + v.get("title", ""))
+    )
 
-    for dimension, delta in new_adjustments.items():
-        if dimension not in existing_dims:
-            data["weight_adjustments"].append({
-                "dimension": dimension,
-                "delta": delta,
-                "trigger": f"{PATTERN_THRESHOLD}+ user disagreements detected",
-                "timestamp": now,
-            })
-            print(f"  [LEARN] New weight adjustment: {dimension} = {delta:+d}")
+    counts = {
+        "saas_penalty_boost": saas_skip_count,
+        "phygital_bonus_boost": phygital_fit_count,
+    }
+    notified = set(data.get("notified_milestones", []))
+    new_notifications = False
 
-    # Update pattern counts
-    data["pattern_counts"] = {}
-    for v in active:
-        reason = v.get("user_reason", "")
-        verdict = v.get("user_verdict", "")
-        if verdict == "Disagree-Skip" and _SAAS_KEYWORDS.search(reason):
-            data["pattern_counts"]["disagree_skip:saas"] = data["pattern_counts"].get("disagree_skip:saas", 0) + 1
-        if verdict == "Disagree-Fit" and _PHYGITAL_KEYWORDS.search(reason):
-            data["pattern_counts"]["disagree_fit:phygital"] = data["pattern_counts"].get("disagree_fit:phygital", 0) + 1
+    for dim, count in counts.items():
+        if count >= PATTERN_THRESHOLD:
+            key = f"{dim}:{count}"
+            if key not in notified:
+                delta = adjustments.get(dim, 0)
+                msg = (
+                    f"Pattern detected: {count} consistent '{dim}' signals\n"
+                    f"Weight adjustment: {delta:+d} pts\n"
+                    f"Use /wait {dim.split('_')[0]} to freeze if wrong."
+                )
+                _queue_notification(msg)
+                print(f"  [LEARN] {msg}")
+                notified.add(key)
+                new_notifications = True
 
-    save_feedback(data, feedback_path)
+    if new_notifications:
+        data["notified_milestones"] = list(notified)
+        # Update pattern_counts for /stats display
+        data["pattern_counts"] = {
+            "disagree_skip:saas": saas_skip_count,
+            "disagree_fit:phygital": phygital_fit_count,
+        }
+        save_feedback(data, feedback_path)
+    elif data.get("pattern_counts") != {
+        "disagree_skip:saas": saas_skip_count,
+        "disagree_fit:phygital": phygital_fit_count,
+    }:
+        data["pattern_counts"] = {
+            "disagree_skip:saas": saas_skip_count,
+            "disagree_fit:phygital": phygital_fit_count,
+        }
+        save_feedback(data, feedback_path)
 
-    cumulative = {}
-    for adj in data["weight_adjustments"]:
-        dim = adj["dimension"]
-        cumulative[dim] = cumulative.get(dim, 0) + adj["delta"]
-    return cumulative
+    return adjustments
+
+
+def drain_notifications():
+    """Read and clear pending_notifications.json. Returns list of message strings."""
+    try:
+        if not NOTIFICATIONS_PATH.exists():
+            return []
+        with open(NOTIFICATIONS_PATH, "r", encoding="utf-8") as f:
+            queue = json.load(f)
+        NOTIFICATIONS_PATH.write_text("[]", encoding="utf-8")
+        return [item["message"] for item in queue if "message" in item]
+    except Exception:
+        return []
 
 
 def sync_verdicts_from_sheet(spreadsheet_id, feedback_path=None, sheet_name="Jobs"):

@@ -44,7 +44,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.constants import ParseMode
 
 from src.sheets import get_client, read_rules
-from src.feedback import record_verdict, apply_weight_adjustments
+from src.feedback import record_verdict, apply_weight_adjustments, drain_notifications
 
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 BOT_TOKEN = os.getenv("TG_JOBSEARCHER_BOT_TOKEN", "")
@@ -568,6 +568,19 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Main
 # ---------------------------------------------------------------------------
 
+async def _send_pending_notifications(app):
+    """Drain pending_notifications.json and send each message to allowed users."""
+    messages = drain_notifications()
+    if not messages or not ALLOWED_USER_IDS:
+        return
+    for uid in ALLOWED_USER_IDS:
+        for msg in messages:
+            try:
+                await app.bot.send_message(chat_id=uid, text=f"Pattern detected:\n{msg}", parse_mode=ParseMode.MARKDOWN)
+            except Exception as e:
+                print(f"  [warn] Could not send TG notification to {uid}: {e}")
+
+
 def main():
     if not BOT_TOKEN:
         print("ERROR: TG_JOBSEARCHER_BOT_TOKEN is not set in .env")
@@ -576,6 +589,7 @@ def main():
         print("WARNING: GOOGLE_SHEETS_SPREADSHEET_ID not set — Sheets commands won't work")
 
     app = Application.builder().token(BOT_TOKEN).build()
+    app.post_init = _send_pending_notifications
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_start))

@@ -108,7 +108,8 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         setup_tabs(spreadsheet_id)
         sync_verdicts_from_sheet(spreadsheet_id)
         sheet_rules = read_rules(spreadsheet_id)
-    weight_adjustments = apply_weight_adjustments()
+    frozen_patterns = sheet_rules.get("frozen_patterns", [])
+    weight_adjustments = apply_weight_adjustments(frozen_patterns=frozen_patterns)
     # Merge sheet-based weight adjustments on top of learned ones
     weight_adjustments.update(sheet_rules["weight_adjustments"])
     if weight_adjustments:
