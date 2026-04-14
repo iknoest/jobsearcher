@@ -12,6 +12,7 @@ import yaml
 import pandas as pd
 from pathlib import Path
 from src.llm import router
+from src.llm.router import AllProvidersExhausted
 from src.feedback import apply_weight_adjustments
 
 
@@ -334,6 +335,10 @@ def score_all_jobs(df, profile=None, min_score=0):
         print(f"  Scoring [{idx+1}/{len(df)}]: {row.get('title', '?')} @ {row.get('company', '?')}")
         try:
             result = score_job(row, profile, feedback_log, weight_adj)
+        except AllProvidersExhausted as e:
+            print(f"\n  [BAIL] All LLM providers exhausted — stopping scoring loop early.")
+            print(f"  Scored {len(scores_data)} of {len(df)} jobs before bail-out.")
+            break
         except Exception as e:
             print(f"    [ERROR] LLM scoring failed, skipping: {str(e)[:80]}")
             new_seen.add(job_url)

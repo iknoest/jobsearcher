@@ -114,16 +114,16 @@
 - [x] frozen_patterns plumbed: read_rules() → main.py → apply_weight_adjustments()
 - [x] 7 feedback tests (replaced 3 old threshold tests with 6 covering nudge/bonus/freeze)
 
-## Phase F: Ad-hoc scoring
-- [ ] `Inbox` tab poller integrated into pipeline
-- [ ] `/score <url|text>` — returns score + which filter would reject (if any)
+## Phase F: Ad-hoc scoring (completed — implemented in Phase B/C)
+- [x] `Inbox` tab poller integrated into pipeline (Phase B: poll_inbox → main.py)
+- [x] `/score <url|text>` — runs pre-filters first, reports which rule killed it, then LLM if passes (Phase C: tg_bot.py cmd_score)
 
-## Phase 1g: Remaining (still relevant)
-- [ ] Run full keyword set (15 keywords across 3 tiers) — now feasible with pre-rank filtering
+## Phase 1g: Remaining
+- [ ] Run full keyword set (15 keywords across 3 tiers) — operational, no code change needed
 - [ ] Re-enable Indeed/Google/Glassdoor platforms (fix hanging on Windows, add timeouts)
-- [ ] Fix Google Sheets feedback sync (header row has duplicate empty cells)
-- [ ] Add short-circuit: if all LLM providers rate-limited once, bail out of scoring loop
-- [ ] Populate industry_bonus / skill_bonus in `config/prerank.yaml` based on scoring patterns
+- [x] Fix Google Sheets feedback sync — switched get_all_records() → get_all_values() with manual header dedup; survives duplicate/empty header cells
+- [x] Short-circuit on LLM exhaustion — AllProvidersExhausted exception bails score loop early with partial results
+- [x] Populate industry_bonus / skill_bonus in config/prerank.yaml (automotive +15, IoT +12, robotics +12, user research +8, VOC +8, etc.)
 
 ## Phase 3: Enhancements
 - [ ] Company enrichment (Glassdoor ratings, Google reviews, company size via web scraping)

@@ -46,17 +46,33 @@ preferred_companies:
 demoted_companies: {}
   # "example bad corp": -30
 
-# --- Preferred industries (checked against description text) ---
-# Placeholder for future skill/industry matching. Currently unused — reserved so
-# the rest of the pipeline stays stable when you start populating it.
-industry_bonus: {}
-  # "automotive": 15
-  # "robotics": 20
-  # "consumer electronics": 15
+# --- Preferred industries (substring match against job description text) ---
+# Based on Ava's domain background and roles that scored Apply historically.
+industry_bonus:
+  "automotive": 15         # BYD/TomTom background; EV/PHEV scoring clinics
+  "consumer electronics": 12
+  "robotics": 12           # Jetta robotics background
+  "iot": 12                # IoT air quality, smart wearables
+  "medical devices": 10    # hardware + user research overlap
+  "smart home": 10
+  "mobility": 8            # automotive adjacency
+  "wearable": 8
 
-# --- Skill bonuses (checked against description text, case-insensitive) ---
-# Placeholder for future use. Start small and expand as you learn what matters.
-skill_bonus: {}
-  # "jira": 5
-  # "python": 5
-  # "figma": 5
+# --- Skill bonuses (substring match against job description text) ---
+# Start conservative — expand as scoring patterns confirm what matters.
+skill_bonus:
+  "user research": 8       # core skill
+  "product research": 8
+  "ux research": 8
+  "python": 5
+  "sql": 5
+  "jira": 4
+  "agile": 4
+  "figma": 4
+  "prototyping": 6
+  "design thinking": 5
+  "voc": 8                 # Voice of Customer — Ava's 4000-person study background
+  "voice of customer": 8
+  "sensor": 6
+  "embedded": 6
+  "cad": 4

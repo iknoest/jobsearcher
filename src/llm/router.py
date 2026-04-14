@@ -1,4 +1,13 @@
-"""Multi-LLM router with quota-aware fallback."""
+"""Multi-LLM router with quota-aware fallback.
+
+Raises AllProvidersExhausted (a subclass of RuntimeError) when every
+configured provider has been marked rate-limited or errored in the
+current session, so callers can bail out of scoring loops early.
+"""
+
+
+class AllProvidersExhausted(RuntimeError):
+    """Raised when every LLM provider has failed or been rate-limited."""
 
 import os
 import json
@@ -117,7 +126,7 @@ def call_llm(prompt, config=None, max_retries=4):
                 usage.setdefault("usage", {})[model_name] = model_config["daily_quota"]
                 save_quota_usage(usage)
 
-    raise RuntimeError("All LLM providers failed after retries")
+    raise AllProvidersExhausted("All LLM providers failed after retries")
 
 
 def _call_anthropic(prompt, config):

@@ -239,7 +239,21 @@ def sync_verdicts_from_sheet(spreadsheet_id, feedback_path=None, sheet_name="Job
         client = get_client()
         spreadsheet = client.open_by_key(spreadsheet_id)
         worksheet = spreadsheet.worksheet(sheet_name)
-        records = worksheet.get_all_records()
+        # Use get_all_values() + manual header mapping to survive duplicate/empty header cells
+        all_values = worksheet.get_all_values()
+        if not all_values:
+            return 0
+        # Deduplicate headers: first occurrence wins; blank headers get a positional name
+        raw_headers = all_values[0]
+        seen_h = {}
+        headers = []
+        for i, h in enumerate(raw_headers):
+            key = h.strip() if h.strip() else f"_col{i}"
+            if key in seen_h:
+                key = f"{key}_{i}"
+            seen_h[key] = True
+            headers.append(key)
+        records = [dict(zip(headers, row)) for row in all_values[1:]]
     except Exception as e:
         print(f"  Feedback sync failed: {e}")
         return 0
