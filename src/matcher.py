@@ -143,18 +143,33 @@ Your job is to transform a job posting into a decision-ready, trustable, low-cog
 
 6. SCORE LOGIC:
    - Phygital relevance: 0-40 (physical+digital = high; pure software = low)
+     Strong(35-40): hardware+software tightly coupled, Ava's exact domain (automotive, robotics, IoT, consumer electronics)
+     Moderate(20-34): physical product but domain mismatch (building materials, industrial machinery, logistics equipment)
+     Weak(0-19): software platform loosely tied to hardware
    - Seniority fit: 0-20 (8+ years, senior/lead)
-   - Domain relevance: 0-15 (product research, UX, IoT, automotive, electronics)
+     Give 20 only if the role explicitly needs senior/lead and matches scope of Ava's experience.
+     Give 12-15 if role level is ambiguous or slightly junior in scope.
+   - Domain relevance: 0-15 (product research, UX, IoT, automotive, consumer electronics)
+     Give 15 only if Ava's EXACT industry background (automotive, IoT, robotics, consumer electronics, smart devices) matches the JD.
+     Give 8-12 if role type matches (e.g. Product Researcher) but industry is unrelated to Ava's background.
+     Give 0-7 if both role type AND industry are mismatches.
    - Research ownership: 0-10 (owns research vs. just executes)
    - Company fit: 0-10
    - Language penalty: 0 to -15 (Dutch mandatory = -15)
    - Driver licence: 0 to -10
    - Pure SaaS penalty: 0 to -40
 
-7. DECISION THRESHOLDS:
+7. DECISION THRESHOLDS AND SCORE DISTRIBUTION:
    - Apply: score >= 75, role genuinely relevant, no major blockers
    - Maybe: 60-74, good relevance but real uncertainty
    - Skip: < 60, or fit depends on too many assumptions
+
+   SCORE SPREAD — use the full range, not a flat 82 for all Apply jobs:
+   - 75-79: Passes threshold but notable domain mismatch or missing key requirement
+   - 80-86: Solid fit — phygital product role in adjacent or matching domain
+   - 87-93: Strong fit — Ava's specific experience (automotive, IoT, VOC, sensor) directly matches JD requirements
+   - 94-100: Exceptional — ideal domain, strong phygital, clear research ownership, no risks
+   Scores clustering at 82 are wrong. Differentiate clearly within the Apply band.
 
 8. WHYFIT MUST BE EMPLOYER-FACING — Each StrongMatch/PartialMatch item must answer: "Why would THIS employer shortlist Ava over a generic candidate for THIS specific role?"
    FORBIDDEN in StrongMatch/PartialMatch:

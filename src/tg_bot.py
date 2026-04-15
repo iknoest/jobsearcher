@@ -412,7 +412,10 @@ async def handle_skip_reason_callback(update: Update, context: ContextTypes.DEFA
 
     if data == "sr:note":
         context.user_data["awaiting_skip_reason"] = True
-        await query.answer("Type your note and send it as a message.", show_alert=False)
+        await query.answer()  # dismiss spinner
+        await query.message.reply_text(
+            "✍️ Type your note and send it — I'll add it to your skip reasons:"
+        )
         return
 
     if data == "sr:submit":
