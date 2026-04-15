@@ -47,32 +47,34 @@ demoted_companies: {}
   # "example bad corp": -30
 
 # --- Preferred industries (substring match against job description text) ---
-# Based on Ava's domain background and roles that scored Apply historically.
+# Industrial is fine when it means consumer electronics manufacturing — keep
+# automotive, consumer electronics, robotics. IoT removed (not a priority domain).
 industry_bonus:
-  "automotive": 15         # BYD/TomTom background; EV/PHEV scoring clinics
-  "consumer electronics": 12
-  "robotics": 12           # Jetta robotics background
-  "iot": 12                # IoT air quality, smart wearables
-  "medical devices": 10    # hardware + user research overlap
-  "smart home": 10
-  "mobility": 8            # automotive adjacency
-  "wearable": 8
+  "automotive": 15              # BYD/TomTom background; EV/PHEV scoring clinics
+  "consumer electronics": 12    # end-user facing hardware products
+  "robotics": 10                # Jetta robotics background
+  "medical devices": 10         # hardware + user research overlap
+  "smart home": 8               # consumer-facing connected products
+  "mobility": 8                 # automotive adjacency
+  "wearable": 8                 # DFO smart wearables background
 
 # --- Skill bonuses (substring match against job description text) ---
-# Start conservative — expand as scoring patterns confirm what matters.
 skill_bonus:
-  "user research": 8       # core skill
+  "user research": 8            # core skill
+  "customer research": 8        # same domain, different label
   "product research": 8
   "ux research": 8
+  "market research": 7          # adjacent to Ava's VOC / consumer insight work
+  "data analysis": 6            # Python/SQL/PowerBI background
+  "voc": 8                      # Voice of Customer — Ava's 4000-person study background
+  "voice of customer": 8
+  "prototyping": 6              # hands-on product development
+  "design thinking": 5
   "python": 5
   "sql": 5
+  "figma": 4
   "jira": 4
   "agile": 4
-  "figma": 4
-  "prototyping": 6
-  "design thinking": 5
-  "voc": 8                 # Voice of Customer — Ava's 4000-person study background
-  "voice of customer": 8
   "sensor": 6
-  "embedded": 6
+  "embedded": 5
   "cad": 4

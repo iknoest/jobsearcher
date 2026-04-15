@@ -211,12 +211,12 @@ def _weekly_summary_line():
     not_fit, good = _weekly_stats()
     parts = []
     if good:
-        parts.append(f"{good} good match{'es' if good > 1 else ''}")
+        parts.append(f"{good} liked")
     if not_fit:
-        parts.append(f"{not_fit} not fit")
+        parts.append(f"{not_fit} skipped")
     if not parts:
-        return "No feedback recorded this week yet."
-    return "This week: " + " · ".join(parts) + "."
+        return "No feedback this week yet. Use /goodmatches or /myskips to review."
+    return f"Your week: {' · '.join(parts)}. Use /goodmatches to review picks."
 
 
 # ---------------------------------------------------------------------------
@@ -778,53 +778,114 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update):
         return await _deny(update)
-    if not SPREADSHEET_ID:
-        await update.message.reply_text("Sheets not configured.")
-        return
     try:
-        ws = _get_jobs_ws()
-        all_values = ws.get_all_values()
-        if len(all_values) < 2:
-            await update.message.reply_text("No jobs in sheet yet.")
-            return
+        # --- Sheet stats ---
+        sheet_lines = []
+        if SPREADSHEET_ID:
+            ws = _get_jobs_ws()
+            all_values = ws.get_all_values()
+            if len(all_values) >= 2:
+                headers = list(all_values[0])
+                seen_h, clean_h = {}, []
+                for idx, h in enumerate(headers):
+                    key = h.strip() if h.strip() else f"_col{idx}"
+                    if key in seen_h:
+                        key = f"{key}_{idx}"
+                    seen_h[key] = True
+                    clean_h.append(key)
+                records = [dict(zip(clean_h, r + [""] * max(0, len(clean_h) - len(r)))) for r in all_values[1:]]
 
-        headers = _parse_ws_headers(ws)
-        records = [dict(zip(headers, r + [""] * max(0, len(headers) - len(r)))) for r in all_values[1:]]
+                from collections import Counter
+                decisions = Counter(str(r.get("Decision", "")).strip() for r in records)
+                cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                recent = [r for r in records if str(r.get("Date", "")) >= cutoff]
+                recent_dec = Counter(str(r.get("Decision", "")).strip() for r in recent)
 
-        from collections import Counter
-        decisions = Counter(str(r.get("Decision", "")).strip() for r in records)
-        verdicts = Counter(str(r.get("My Verdict", "")).strip() for r in records if r.get("My Verdict", "").strip())
+                total = len(records)
+                r_apply = recent_dec.get("Apply", 0)
+                r_maybe = recent_dec.get("Maybe", 0)
+                r_skip  = recent_dec.get("Skip", 0)
+                r_total = len(recent)
 
-        cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-        recent = [r for r in records if str(r.get("Date", "")) >= cutoff]
-        recent_dec = Counter(str(r.get("Decision", "")) for r in recent)
+                sheet_lines = [
+                    f"*Pipeline — last 7 days ({r_total} scanned)*",
+                    f"  Apply: {r_apply}  Maybe: {r_maybe}  Skip: {r_skip}",
+                    f"All time: {total} jobs  (Apply {decisions.get('Apply',0)} / Maybe {decisions.get('Maybe',0)} / Skip {decisions.get('Skip',0)})",
+                ]
 
+        # --- Feedback stats ---
         not_fit, good = _weekly_stats()
+        data = load_feedback()
+        active = get_active_verdicts(data)
+        all_good  = sum(1 for v in active if _is_good_signal(v.get("user_verdict", "")))
+        all_skips = sum(1 for v in active if _is_skip_signal(v.get("user_verdict", "")))
 
-        lines = [
-            f"*Stats — {len(records)} total jobs*\n",
-            "All time:",
-            f"  Apply: {decisions.get('Apply', 0)}  Maybe: {decisions.get('Maybe', 0)}  Skip: {decisions.get('Skip', 0)}",
-            f"\nLast 7 days ({len(recent)} jobs):",
-            f"  Apply: {recent_dec.get('Apply', 0)}  Maybe: {recent_dec.get('Maybe', 0)}  Skip: {recent_dec.get('Skip', 0)}",
-            f"\nYour feedback this week:",
-            f"  Good match: {good}  Not fit: {not_fit}",
+        fb_lines = [
+            f"\n*Your feedback — this week*",
+            f"  Liked: {good}  Skipped: {not_fit}",
+            f"All time: {all_good} liked · {all_skips} skipped",
+            f"\n/goodmatches — review jobs you liked",
+            f"/myskips — review jobs you skipped",
         ]
-        if verdicts:
-            lines.append("\nAll verdicts:")
-            for v, n in verdicts.most_common():
-                if v:
-                    lines.append(f"  {v}: {n}")
 
         adj = apply_weight_adjustments()
+        adj_lines = []
         if adj:
-            lines.append("\nLearned adjustments:")
+            adj_lines = ["\n*Learned adjustments:*"]
             for dim, delta in adj.items():
-                lines.append(f"  {dim}: {delta:+d}")
+                adj_lines.append(f"  {dim}: {delta:+d}")
 
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(
+            "\n".join(sheet_lines + fb_lines + adj_lines),
+            parse_mode=ParseMode.MARKDOWN,
+        )
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_goodmatches(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List jobs the user marked as Good Match — stored for later application."""
+    if not _is_allowed(update):
+        return await _deny(update)
+    data = load_feedback()
+    active = get_active_verdicts(data)
+    good = [v for v in active if _is_good_signal(v.get("user_verdict", ""))]
+    if not good:
+        await update.message.reply_text("No Good Match verdicts recorded yet.")
+        return
+
+    lines = [f"*Good Matches ({len(good)} jobs to apply)*\n"]
+    for v in reversed(good):  # most recent first
+        ts = v.get("timestamp", "")[:10]
+        title = v.get("title", "?")
+        score = v.get("system_score", "?")
+        url = v.get("job_url", "")
+        short_url = url[:60] + "…" if len(url) > 60 else url
+        lines.append(f"• *{title}* (Score {score}) — {ts}\n  {short_url}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN,
+                                    disable_web_page_preview=True)
+
+
+async def cmd_myskips(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List jobs the user skipped — with reasons."""
+    if not _is_allowed(update):
+        return await _deny(update)
+    data = load_feedback()
+    active = get_active_verdicts(data)
+    skipped = [v for v in active if _is_skip_signal(v.get("user_verdict", ""))]
+    if not skipped:
+        await update.message.reply_text("No skipped jobs recorded yet.")
+        return
+
+    lines = [f"*Skipped Jobs ({len(skipped)})*\n"]
+    for v in reversed(skipped[-15:]):  # last 15, most recent first
+        ts = v.get("timestamp", "")[:10]
+        title = v.get("title", "?")
+        reason = v.get("user_reason", "—")
+        lines.append(f"• *{title}* — {ts}\n  _{reason}_")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
 # ---------------------------------------------------------------------------
@@ -852,9 +913,20 @@ Rules:
   /wait <pat>   — Freeze learning for pattern
   /ok <pat>     — Unfreeze
 
-Info:
+Review:
+  /goodmatches  — Jobs you liked (apply later)
+  /myskips      — Jobs you skipped + reasons
+  /stats        — Full pipeline stats + learned adjustments
+
+Rules:
+  /block <kw>   — Hard-reject jobs with this keyword
+  /addkw <kw>   — Add search keyword
+  /rmkw <kw>    — Remove search keyword
+  /wait <pat>   — Freeze learning for pattern
+  /ok <pat>     — Unfreeze
+
+Other:
   /rules — Active rules
-  /stats — Pipeline stats + your feedback
 """
 
 
@@ -913,6 +985,8 @@ def main():
     app.add_handler(CommandHandler("ok", cmd_ok))
     app.add_handler(CommandHandler("rules", cmd_rules))
     app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("goodmatches", cmd_goodmatches))
+    app.add_handler(CommandHandler("myskips", cmd_myskips))
 
     # Inline keyboard handler for skip reason buttons
     app.add_handler(CallbackQueryHandler(handle_skip_reason_callback, pattern=r"^sr:"))
