@@ -28,7 +28,7 @@ from src.scraper import scrape_all_keywords
 from src.filters import enrich_and_filter, language_prefilter
 from src.matcher import score_all_jobs
 from src.travel import enrich_with_travel_time
-from src.sheets import append_jobs, setup_tabs, poll_inbox, update_inbox_status, read_rules
+from src.sheets import append_jobs, setup_tabs, poll_inbox, update_inbox_status, read_rules, get_existing_urls
 from src.notifier import send_email, build_prerank_digest
 from src.feedback import sync_verdicts_from_sheet, apply_weight_adjustments
 from src.prerank import apply_prerank, split_by_prerank
@@ -186,6 +186,37 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         os.makedirs("output", exist_ok=True)
         jobs.to_csv("output/scrape_results.csv", index=False)
         print("Saved to output/scrape_results.csv")
+        return
+
+    # Step 4.2: Dedup against Sheet + fuzzy title/company dedup (no LLM, saves quota)
+    print("\n[4.2/7] Deduplicating against Sheet + title/company...")
+    t0 = time.time()
+    import pandas as pd
+    before_dedup = len(jobs)
+
+    # 4.2a: Remove URLs already in the Sheet (they've been scored before)
+    if spreadsheet_id:
+        existing_urls = get_existing_urls(spreadsheet_id)
+        jobs = jobs[~jobs["job_url"].isin(existing_urls)].reset_index(drop=True)
+        sheet_removed = before_dedup - len(jobs)
+        if sheet_removed:
+            print(f"  Removed {sheet_removed} already-in-Sheet jobs (by URL)")
+
+    # 4.2b: Fuzzy dedup by normalised title + company (same role, different tracking URLs)
+    def _norm(s):
+        return str(s).lower().strip()
+
+    jobs["_tc_key"] = jobs["title"].map(_norm) + "|" + jobs["company"].map(_norm)
+    before_fuzzy = len(jobs)
+    jobs = jobs.drop_duplicates(subset=["_tc_key"], keep="first").reset_index(drop=True)
+    jobs = jobs.drop(columns=["_tc_key"])
+    fuzzy_removed = before_fuzzy - len(jobs)
+    if fuzzy_removed:
+        print(f"  Removed {fuzzy_removed} duplicate title+company jobs")
+
+    print(f"  {before_dedup} -> {len(jobs)} jobs remaining  -> {time.time() - t0:.0f}s")
+    if jobs.empty:
+        print("All jobs already scored or deduped. Exiting.")
         return
 
     # Step 4.5: Pre-rank — cheap, rule-based scoring before the LLM

@@ -220,49 +220,69 @@ def _weekly_summary_line():
 
 
 # ---------------------------------------------------------------------------
-# Suggested reasons extractor
+# Skip reason builder — multi-choice categories + LLM-specific gaps
 # ---------------------------------------------------------------------------
 
 _JUNK_VALUES = {"false", "true", "none", "nan", "", "-", "n/a", "no gaps", "no gap"}
+
+# Fixed categories always available in the skip flow (in order)
+_SKIP_CATEGORIES = [
+    "Wrong industry / sector",
+    "Missing hardware · phygital domain",
+    "Role scope or seniority doesn't fit",
+    "Company culture / size doesn't fit",
+    "Location or commute concern",
+]
 
 
 def _is_meaningful(s: str) -> bool:
     return s.lower() not in _JUNK_VALUES and len(s) > 4
 
 
-def _extract_suggested_reasons(rec):
-    """Pull 2-3 skip reason buttons from LLM analysis columns.
+def _build_skip_options(rec) -> list[str]:
+    """Return ordered list of skip reason options shown as toggle buttons.
 
-    Priority:
-    1. Gap Analysis items (semicolon-separated JD-specific gaps from LLM)
-    2. Main Risk text
-    3. "Don't like <industry>" (if industry known and < 3 reasons so far)
-    4. Generic fallback only if nothing else found
+    Order:
+    1. LLM-specific gaps from Gap Analysis (max 2) — most concrete
+    2. Main Risk from LLM (if meaningful)
+    3. "Don't like <industry>" if industry is known
+    4. Fixed generic categories (always present)
     """
-    suggested = []
+    options = []
 
-    # 1. Gap Analysis — most specific, split by semicolon
     gap_analysis = str(rec.get("Gap Analysis", "")).strip()
     for item in gap_analysis.split(";"):
         item = item.strip()
-        if _is_meaningful(item) and len(suggested) < 2:
-            suggested.append(item[:50])
+        if _is_meaningful(item) and len(options) < 2:
+            options.append(item[:50])
 
-    # 2. Main Risk
     main_risk = str(rec.get("Main Risk", "")).strip()
-    if _is_meaningful(main_risk) and len(suggested) < 3:
-        suggested.append(main_risk[:50])
+    if _is_meaningful(main_risk) and main_risk not in options:
+        options.append(main_risk[:50])
 
-    # 3. Industry dislike button
     industry = str(rec.get("Industry", "")).strip()
-    if _is_meaningful(industry) and len(suggested) < 3:
-        suggested.append(f"Don't like {industry} industry")
+    if _is_meaningful(industry):
+        options.append(f"Don't like {industry} industry")
 
-    # 4. Fallback: generic skip reasons if we have nothing
-    if not suggested:
-        suggested = ["Not the right domain", "Role doesn't match my focus"]
+    # Always append fixed categories (skip any that duplicate LLM content)
+    for cat in _SKIP_CATEGORIES:
+        options.append(cat)
 
-    return suggested[:3]
+    return options
+
+
+def _build_skip_keyboard(options: list[str], selected: set) -> InlineKeyboardMarkup:
+    """Build toggle keyboard. Selected items show ✅ prefix. Submit at bottom."""
+    keyboard = []
+    for i, opt in enumerate(options):
+        label = ("✅ " if i in selected else "") + (opt if len(opt) <= 38 else opt[:35] + "…")
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"sr:T:{i}")])
+    # Bottom row
+    bottom = [InlineKeyboardButton("✍️ Add note", callback_data="sr:note")]
+    if selected:
+        bottom.append(InlineKeyboardButton("Submit →", callback_data="sr:submit"))
+    keyboard.append(bottom)
+    return InlineKeyboardMarkup(keyboard)
 
 
 # ---------------------------------------------------------------------------
@@ -326,32 +346,27 @@ async def _handle_skip_deeplink(update: Update, context: ContextTypes.DEFAULT_TY
         decision = str(rec.get("Decision", "?"))
         prev_verdict = str(rec.get("My Verdict", "")).strip()
 
-        suggested = _extract_suggested_reasons(rec)
+        options = _build_skip_options(rec)
 
         # Store state in user_data
         context.user_data["pending_skip"] = {
             "job_id": job_id,
             "row_index": row_index,  # may be None if not found in sheet
             "rec": rec,
-            "suggested": suggested,
+            "options": options,
+            "selected": set(),   # indices of toggled options
+            "extra_note": "",    # typed note appended to reasons
         }
         context.user_data["awaiting_skip_reason"] = False
-
-        # Build inline keyboard
-        keyboard = []
-        for i, reason in enumerate(suggested):
-            display = reason if len(reason) <= 35 else reason[:32] + "…"
-            keyboard.append([InlineKeyboardButton(display, callback_data=f"sr:{i}")])
-        keyboard.append([InlineKeyboardButton("✍️ Type my own reason", callback_data="sr:other")])
 
         prev_note = f"\n_Previous: {prev_verdict}_" if prev_verdict else ""
         await update.message.reply_text(
             f"*Skip: {title}*\n"
             f"{company} · Score {score} ({decision}){prev_note}\n"
             f"ID: `{job_id}`\n\n"
-            f"Why are you skipping?",
+            f"Select all reasons that apply, then tap Submit:",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=_build_skip_keyboard(options, set()),
         )
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
@@ -373,29 +388,51 @@ async def handle_skip_reason_callback(update: Update, context: ContextTypes.DEFA
         )
         return
 
-    data = query.data  # "sr:0", "sr:1", "sr:2", "sr:other"
+    data = query.data  # "sr:T:<idx>", "sr:note", "sr:submit"
 
-    if data == "sr:other":
-        context.user_data["awaiting_skip_reason"] = True
-        rec = pending["rec"]
-        await query.edit_message_text(
-            f"*Skip: {rec.get('Title', '?')}*\n"
-            f"Type your reason and send it as a message:",
-            parse_mode=ParseMode.MARKDOWN,
+    options = pending.get("options", [])
+    selected: set = pending.get("selected", set())
+
+    if data.startswith("sr:T:"):
+        # Toggle a reason on/off
+        try:
+            idx = int(data.split(":")[2])
+        except (ValueError, IndexError):
+            idx = -1
+        if idx >= 0:
+            if idx in selected:
+                selected.discard(idx)
+            else:
+                selected.add(idx)
+            pending["selected"] = selected
+        await query.edit_message_reply_markup(
+            reply_markup=_build_skip_keyboard(options, selected)
         )
         return
 
-    try:
-        idx = int(data.split(":")[1])
-        reason = pending["suggested"][idx] if idx < len(pending["suggested"]) else "Skipped from email"
-    except (ValueError, IndexError):
-        reason = "Skipped from email"
+    if data == "sr:note":
+        context.user_data["awaiting_skip_reason"] = True
+        await query.answer("Type your note and send it as a message.", show_alert=False)
+        return
 
-    await _commit_skip(query=query, context=context, pending=pending, reason=reason)
+    if data == "sr:submit":
+        real_selected = {i for i in selected if i >= 0}
+        if not real_selected and not pending.get("extra_note"):
+            await query.answer("Select at least one reason first.", show_alert=True)
+            return
+        parts = [options[i] for i in sorted(real_selected) if i < len(options)]
+        if pending.get("extra_note"):
+            parts.append(pending["extra_note"])
+        reason = "; ".join(parts) if parts else "Skipped from email"
+        await _commit_skip(query=query, context=context, pending=pending, reason=reason)
+        return
+
+    # Fallback — unknown action
+    await query.answer()
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle typed skip reason after user tapped 'Type my own'."""
+    """Handle typed note during skip flow. Adds note to selection, re-shows keyboard."""
     if not _is_allowed(update):
         return
     if not context.user_data.get("awaiting_skip_reason"):
@@ -406,8 +443,19 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     context.user_data["awaiting_skip_reason"] = False
-    reason = update.message.text.strip()
-    await _commit_skip(message=update.message, context=context, pending=pending, reason=reason)
+    pending["extra_note"] = update.message.text.strip()
+    pending["selected"].add(-1)  # sentinel so Submit becomes visible
+
+    options = pending.get("options", [])
+    selected = pending.get("selected", set())
+    rec = pending["rec"]
+    title = str(rec.get("Title", pending["job_id"]))
+
+    await update.message.reply_text(
+        f"Note added. Now tap Submit to record your skip for *{title}*.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_build_skip_keyboard(options, selected),
+    )
 
 
 async def _commit_skip(context, pending, reason, query=None, message=None):
