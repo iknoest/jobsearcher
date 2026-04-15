@@ -223,21 +223,44 @@ def _weekly_summary_line():
 # Suggested reasons extractor
 # ---------------------------------------------------------------------------
 
+_JUNK_VALUES = {"false", "true", "none", "nan", "", "-", "n/a", "no gaps", "no gap"}
+
+
+def _is_meaningful(s: str) -> bool:
+    return s.lower() not in _JUNK_VALUES and len(s) > 4
+
+
 def _extract_suggested_reasons(rec):
-    """Pull 2-3 short skip reasons from LLM analysis columns (Gap Analysis, Main Risk)."""
+    """Pull 2-3 skip reason buttons from LLM analysis columns.
+
+    Priority:
+    1. Gap Analysis items (semicolon-separated JD-specific gaps from LLM)
+    2. Main Risk text
+    3. "Don't like <industry>" (if industry known and < 3 reasons so far)
+    4. Generic fallback only if nothing else found
+    """
     suggested = []
+
+    # 1. Gap Analysis — most specific, split by semicolon
     gap_analysis = str(rec.get("Gap Analysis", "")).strip()
+    for item in gap_analysis.split(";"):
+        item = item.strip()
+        if _is_meaningful(item) and len(suggested) < 2:
+            suggested.append(item[:50])
+
+    # 2. Main Risk
     main_risk = str(rec.get("Main Risk", "")).strip()
-    why_not_fit = str(rec.get("Why Not Fit", "")).strip()
+    if _is_meaningful(main_risk) and len(suggested) < 3:
+        suggested.append(main_risk[:50])
 
-    for source in [gap_analysis, why_not_fit]:
-        for item in source.split(";"):
-            item = item.strip()
-            if item and len(item) > 3 and len(suggested) < 2:
-                suggested.append(item[:45])
+    # 3. Industry dislike button
+    industry = str(rec.get("Industry", "")).strip()
+    if _is_meaningful(industry) and len(suggested) < 3:
+        suggested.append(f"Don't like {industry} industry")
 
-    if main_risk and len(suggested) < 3:
-        suggested.append(main_risk[:45])
+    # 4. Fallback: generic skip reasons if we have nothing
+    if not suggested:
+        suggested = ["Not the right domain", "Role doesn't match my focus"]
 
     return suggested[:3]
 
