@@ -16,12 +16,18 @@ Deep-link flows (from email buttons):
 All verdicts overwrite previous ones (latest always wins). Timestamp written to Sheet.
 """
 
+import html as _html
 import os
 import sys
 import json
 import asyncio
 import re as _re
 from datetime import datetime, timedelta
+
+
+def _h(text) -> str:
+    """Escape text for Telegram HTML mode. Always use this on dynamic content."""
+    return _html.escape(str(text))
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -316,12 +322,14 @@ async def _handle_good_deeplink(update: Update, job_id: str):
             user_reason="Tapped Good match in email",
         )
 
-        overwrite = f"\n_Previous verdict: {prev_verdict} — overwritten._" if prev_verdict and prev_verdict != "Good Match" else ""
+        overwrite = f"\n<i>Overwrote: {_h(prev_verdict)}</i>" if prev_verdict and prev_verdict != "Good Match" else ""
         await update.message.reply_text(
-            f"Recorded. *{title}*\n"
-            f"{company} · Score {score}{overwrite}\n\n"
+            f"✅ <b>Good Match recorded</b>\n"
+            f"{_h(title)}\n"
+            f"{_h(company)}  ·  Score {_h(score)}"
+            f"{overwrite}\n\n"
             f"{_weekly_summary_line()}",
-            parse_mode=ParseMode.MARKDOWN,
+            parse_mode=ParseMode.HTML,
         )
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
@@ -359,13 +367,13 @@ async def _handle_skip_deeplink(update: Update, context: ContextTypes.DEFAULT_TY
         }
         context.user_data["awaiting_skip_reason"] = False
 
-        prev_note = f"\n_Previous: {prev_verdict}_" if prev_verdict else ""
+        prev_note = f"\n<i>Previous: {_h(prev_verdict)}</i>" if prev_verdict else ""
         await update.message.reply_text(
-            f"*Skip: {title}*\n"
-            f"{company} · Score {score} ({decision}){prev_note}\n"
-            f"ID: `{job_id}`\n\n"
-            f"Select all reasons that apply, then tap Submit:",
-            parse_mode=ParseMode.MARKDOWN,
+            f"<b>Skip — {_h(title)}</b>\n"
+            f"{_h(company)}  ·  Score {_h(score)}  ({_h(decision)})"
+            f"{prev_note}\n\n"
+            f"Select all reasons that apply, then tap Submit ↓",
+            parse_mode=ParseMode.HTML,
             reply_markup=_build_skip_keyboard(options, set()),
         )
     except Exception as e:
@@ -455,8 +463,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     title = str(rec.get("Title", pending["job_id"]))
 
     await update.message.reply_text(
-        f"Note added. Now tap Submit to record your skip for *{title}*.",
-        parse_mode=ParseMode.MARKDOWN,
+        f"Note added ✓  Tap <b>Submit →</b> to record your skip for <b>{_h(title)}</b>.",
+        parse_mode=ParseMode.HTML,
         reply_markup=_build_skip_keyboard(options, selected),
     )
 
@@ -492,14 +500,15 @@ async def _commit_skip(context, pending, reason, query=None, message=None):
     context.user_data.pop("pending_skip", None)
 
     text = (
-        f"Recorded. *{title}* @ {company} — Skip\n"
-        f"Reason: _{reason}_\n\n"
+        f"⏭ <b>Skipped</b> — {_h(title)}\n"
+        f"{_h(company)}\n"
+        f"<i>Reason: {_h(reason)}</i>\n\n"
         f"{_weekly_summary_line()}"
     )
     if query:
-        await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML)
     elif message:
-        await message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+        await message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 # ---------------------------------------------------------------------------
@@ -515,8 +524,7 @@ async def _write_feedback(update: Update, url_or_id: str, verdict: str, reason: 
         row_index, rec = _find_job_row(ws, url_or_id)
         if row_index is None:
             await update.message.reply_text(
-                f"Job not found: `{url_or_id}`\nUse the numeric job ID from the LinkedIn URL.",
-                parse_mode=ParseMode.MARKDOWN,
+                f"Job not found: {_h(url_or_id)}\nUse the numeric job ID from the LinkedIn URL."
             )
             return
 
@@ -534,11 +542,14 @@ async def _write_feedback(update: Update, url_or_id: str, verdict: str, reason: 
         title = rec.get("Title", "?")
         company = rec.get("Company", "?")
         score = rec.get("Score", "?")
-        overwrite = f"\n_Overwrote: {prev_verdict}_" if prev_verdict and prev_verdict != verdict else ""
+        overwrite = f"\n<i>Overwrote: {_h(prev_verdict)}</i>" if prev_verdict and prev_verdict != verdict else ""
         await update.message.reply_text(
-            f"Recorded *{verdict}*\n{title} @ {company} (score {score}){overwrite}\n"
-            f"Reason: {reason or '—'}\n\n{_weekly_summary_line()}",
-            parse_mode=ParseMode.MARKDOWN,
+            f"<b>{_h(verdict)}</b> recorded\n"
+            f"{_h(title)}  ·  {_h(company)}  (score {_h(score)})"
+            f"{overwrite}\n"
+            f"Reason: {_h(reason) if reason else '—'}\n\n"
+            f"{_weekly_summary_line()}",
+            parse_mode=ParseMode.HTML,
         )
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
@@ -618,12 +629,12 @@ async def cmd_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
         df, lang_rejections = language_prefilter(df)
         if df.empty:
             reason = lang_rejections[0].get("SkipReason", "Dutch mandatory") if lang_rejections else "Language filter"
-            await msg.edit_text(f"Rejected at language pre-filter: *{reason}*", parse_mode=ParseMode.MARKDOWN)
+            await msg.edit_text(f"Rejected at language pre-filter: {_h(reason)}")
             return
         df, filter_log = enrich_and_filter(df)
         if df.empty:
             reason = filter_log[0].get("reason", "Filter") if filter_log else "Pre-filter"
-            await msg.edit_text(f"Rejected at pre-filter: *{reason}*", parse_mode=ParseMode.MARKDOWN)
+            await msg.edit_text(f"Rejected at pre-filter: {_h(reason)}")
             return
 
         from src.matcher import score_job
@@ -635,24 +646,25 @@ async def cmd_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
         score = card.get("MatchScore", 0)
         decision = card.get("DecisionHint", "?")
         lines = [
-            f"*{decision}* — {score}/100 (Confidence: {trust.get('Confidence', '?')})",
-            f"_{card.get('TopLabel', '')}_" if card.get("TopLabel") else "",
+            f"<b>{_h(decision)}</b>  {score}/100  (Confidence: {_h(trust.get('Confidence', '?'))})",
         ]
+        if card.get("TopLabel"):
+            lines.append(f"<i>{_h(card['TopLabel'])}</i>")
         if card.get("RoleSummary"):
-            lines.append(f"\n_{card['RoleSummary']}_")
+            lines.append(f"\n<i>{_h(card['RoleSummary'])}</i>")
         if card.get("BlockingAlert"):
-            lines.append(f"\n⚠ {card['BlockingAlert']}")
+            lines.append(f"\n⚠ {_h(card['BlockingAlert'])}")
         if card.get("MainRisk"):
-            lines.append(f"Risk: {card['MainRisk']}")
+            lines.append(f"Risk: {_h(card['MainRisk'])}")
         strong = fit.get("StrongMatch", [])
         if strong:
-            lines.append("\n*Strong Match:*")
-            lines += [f"• {s}" for s in strong]
+            lines.append("\n<b>Strong Match</b>")
+            lines += [f"• {_h(s)}" for s in strong]
         gaps = result.get("Gaps", [])
         if gaps:
-            lines.append("\n*Gaps:*")
-            lines += [f"• {g}" for g in gaps]
-        await msg.edit_text("\n".join(l for l in lines if l), parse_mode=ParseMode.MARKDOWN)
+            lines.append("\n<b>Gaps</b>")
+            lines += [f"• {_h(g)}" for g in gaps]
+        await msg.edit_text("\n".join(l for l in lines if l), parse_mode=ParseMode.HTML)
     except Exception as e:
         await msg.edit_text(f"Scoring failed: {e}")
 
@@ -670,7 +682,7 @@ async def cmd_block(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyword = " ".join(context.args)
     try:
         _append_rule("keyword_block", keyword, note=f"Added via TG by {update.effective_user.username}")
-        await update.message.reply_text(f"Blocked: *{keyword}*", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"Blocked: {_h(keyword)}")
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
@@ -684,7 +696,7 @@ async def cmd_addkw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyword = " ".join(context.args)
     try:
         _append_rule("keyword_add", keyword, note=f"Added via TG by {update.effective_user.username}")
-        await update.message.reply_text(f"Added keyword: *{keyword}*", parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"Added keyword: {_h(keyword)}")
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
@@ -698,8 +710,8 @@ async def cmd_rmkw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyword = " ".join(context.args)
     try:
         n = _deactivate_rule("keyword_add", keyword)
-        msg = f"Deactivated: *{keyword}*" if n else f"No active keyword found: {keyword}"
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        msg = f"Deactivated: {_h(keyword)}" if n else f"No active keyword found: {_h(keyword)}"
+        await update.message.reply_text(msg)
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
@@ -714,8 +726,7 @@ async def cmd_wait(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         _append_rule("wait", pattern, note="Learning freeze via TG")
         await update.message.reply_text(
-            f"Learning frozen: *{pattern}*\nUse /ok {pattern} to unfreeze.",
-            parse_mode=ParseMode.MARKDOWN,
+            f"Learning frozen: {_h(pattern)}\nUse /ok {_h(pattern)} to unfreeze."
         )
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
@@ -730,8 +741,8 @@ async def cmd_ok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pattern = " ".join(context.args)
     try:
         n = _deactivate_rule("wait", pattern)
-        msg = f"Unfrozen: *{pattern}*" if n else f"No active wait found: {pattern}"
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        msg = f"Unfrozen: {_h(pattern)}" if n else f"No active wait found: {_h(pattern)}"
+        await update.message.reply_text(msg)
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
@@ -748,29 +759,29 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         rules = read_rules(SPREADSHEET_ID)
-        lines = ["*Active Rules:*\n"]
+        lines = ["<b>Active Rules</b>\n"]
         if rules["weight_adjustments"]:
             lines.append("Weight adjustments:")
             for dim, delta in rules["weight_adjustments"].items():
-                lines.append(f"  {dim}: {delta:+d}")
+                lines.append(f"  {_h(dim)}: {delta:+d}")
         if rules["keyword_blocks"]:
             lines.append("\nKeyword blocks:")
-            lines += [f"  ✗ {kw}" for kw in rules["keyword_blocks"]]
+            lines += [f"  ✗ {_h(kw)}" for kw in rules["keyword_blocks"]]
         if rules["keyword_adds"]:
             lines.append("\nSearch keywords:")
-            lines += [f"  + {kw}" for kw in rules["keyword_adds"]]
+            lines += [f"  + {_h(kw)}" for kw in rules["keyword_adds"]]
         if rules["company_boosts"]:
             lines.append("\nCompany boosts:")
-            lines += [f"  {co}: {d:+d}" for co, d in rules["company_boosts"].items()]
+            lines += [f"  {_h(co)}: {d:+d}" for co, d in rules["company_boosts"].items()]
         if rules["company_demotes"]:
             lines.append("\nCompany demotes:")
-            lines += [f"  {co}: {d:+d}" for co, d in rules["company_demotes"].items()]
+            lines += [f"  {_h(co)}: {d:+d}" for co, d in rules["company_demotes"].items()]
         if rules["frozen_patterns"]:
             lines.append("\nFrozen (learning paused):")
-            lines += [f"  ⏸ {p}" for p in rules["frozen_patterns"]]
+            lines += [f"  ⏸ {_h(p)}" for p in rules["frozen_patterns"]]
         if len(lines) == 1:
             lines.append("No active rules.")
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
@@ -808,8 +819,8 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 r_total = len(recent)
 
                 sheet_lines = [
-                    f"*Pipeline — last 7 days ({r_total} scanned)*",
-                    f"  Apply: {r_apply}  Maybe: {r_maybe}  Skip: {r_skip}",
+                    f"<b>Pipeline — last 7 days</b>  ({r_total} scanned)",
+                    f"  Apply {r_apply}  ·  Maybe {r_maybe}  ·  Skip {r_skip}",
                     f"All time: {total} jobs  (Apply {decisions.get('Apply',0)} / Maybe {decisions.get('Maybe',0)} / Skip {decisions.get('Skip',0)})",
                 ]
 
@@ -821,9 +832,9 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         all_skips = sum(1 for v in active if _is_skip_signal(v.get("user_verdict", "")))
 
         fb_lines = [
-            f"\n*Your feedback — this week*",
-            f"  Liked: {good}  Skipped: {not_fit}",
-            f"All time: {all_good} liked · {all_skips} skipped",
+            f"\n<b>Your feedback — this week</b>",
+            f"  Liked: {good}  ·  Skipped: {not_fit}",
+            f"All time: {all_good} liked  ·  {all_skips} skipped",
             f"\n/goodmatches — review jobs you liked",
             f"/myskips — review jobs you skipped",
         ]
@@ -831,13 +842,13 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         adj = apply_weight_adjustments()
         adj_lines = []
         if adj:
-            adj_lines = ["\n*Learned adjustments:*"]
+            adj_lines = ["\n<b>Learned adjustments</b>"]
             for dim, delta in adj.items():
-                adj_lines.append(f"  {dim}: {delta:+d}")
+                adj_lines.append(f"  {_h(dim)}: {delta:+d}")
 
         await update.message.reply_text(
             "\n".join(sheet_lines + fb_lines + adj_lines),
-            parse_mode=ParseMode.MARKDOWN,
+            parse_mode=ParseMode.HTML,
         )
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
@@ -854,16 +865,15 @@ async def cmd_goodmatches(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No Good Match verdicts recorded yet.")
         return
 
-    lines = [f"*Good Matches ({len(good)} jobs to apply)*\n"]
+    lines = [f"<b>Good Matches — {len(good)} jobs to apply</b>\n"]
     for v in reversed(good):  # most recent first
         ts = v.get("timestamp", "")[:10]
-        title = v.get("title", "?")
+        title = _h(v.get("title", "?"))
         score = v.get("system_score", "?")
         url = v.get("job_url", "")
-        short_url = url[:60] + "…" if len(url) > 60 else url
-        lines.append(f"• *{title}* (Score {score}) — {ts}\n  {short_url}")
+        lines.append(f"• <b>{title}</b>  (Score {score})  {ts}\n  {url}")
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN,
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML,
                                     disable_web_page_preview=True)
 
 
@@ -878,56 +888,42 @@ async def cmd_myskips(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No skipped jobs recorded yet.")
         return
 
-    lines = [f"*Skipped Jobs ({len(skipped)})*\n"]
+    lines = [f"<b>Skipped Jobs — {len(skipped)} total</b>\n"]
     for v in reversed(skipped[-15:]):  # last 15, most recent first
         ts = v.get("timestamp", "")[:10]
-        title = v.get("title", "?")
-        reason = v.get("user_reason", "—")
-        lines.append(f"• *{title}* — {ts}\n  _{reason}_")
+        title = _h(v.get("title", "?"))
+        reason = _h(v.get("user_reason", "—"))
+        lines.append(f"• <b>{title}</b>  {ts}\n  <i>{reason}</i>")
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 # ---------------------------------------------------------------------------
 # /start  /help
 # ---------------------------------------------------------------------------
 
-HELP_TEXT = """\
-*Jobsearcher Bot*
-
-From email buttons:
-  Tap *Good match* or *Skip* → guided feedback flow with suggested reasons
-
-Manual feedback:
-  /good <id> [note]   — Mark as good match
-  /skip <id> <reason> — Mark as skip
-  /uncertain <id>     — Flag for review
-
-Ad-hoc:
-  /score <url\\_or\\_jd> — Score any job
-
-Rules:
-  /block <kw>   — Hard-reject jobs with this keyword
-  /addkw <kw>   — Add search keyword
-  /rmkw <kw>    — Remove search keyword
-  /wait <pat>   — Freeze learning for pattern
-  /ok <pat>     — Unfreeze
-
-Review:
-  /goodmatches  — Jobs you liked (apply later)
-  /myskips      — Jobs you skipped + reasons
-  /stats        — Full pipeline stats + learned adjustments
-
-Rules:
-  /block <kw>   — Hard-reject jobs with this keyword
-  /addkw <kw>   — Add search keyword
-  /rmkw <kw>    — Remove search keyword
-  /wait <pat>   — Freeze learning for pattern
-  /ok <pat>     — Unfreeze
-
-Other:
-  /rules — Active rules
-"""
+HELP_TEXT = (
+    "<b>Jobsearcher Bot</b>\n\n"
+    "<b>From email</b>\n"
+    "Tap Good match or Skip → guided flow with suggested reasons\n\n"
+    "<b>Review your picks</b>\n"
+    "/goodmatches — jobs you liked (apply later)\n"
+    "/myskips — jobs you skipped + reasons\n"
+    "/stats — pipeline stats + learned adjustments\n\n"
+    "<b>Manual feedback</b>\n"
+    "/good [id] [note] — mark good match\n"
+    "/skip [id] [reason] — mark skip\n"
+    "/uncertain [id] — flag for review\n\n"
+    "<b>Ad-hoc scoring</b>\n"
+    "/score [url or job description] — score any job now\n\n"
+    "<b>Rules</b>\n"
+    "/block [kw] — hard-reject jobs with this keyword\n"
+    "/addkw [kw] — add search keyword\n"
+    "/rmkw [kw] — remove search keyword\n"
+    "/wait [pattern] — freeze learning for pattern\n"
+    "/ok [pattern] — unfreeze\n"
+    "/rules — show active rules"
+)
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -943,7 +939,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _handle_skip_deeplink(update, context, param[5:])
             return
 
-    await update.message.reply_text(HELP_TEXT, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(HELP_TEXT, parse_mode=ParseMode.HTML)
 
 
 # ---------------------------------------------------------------------------
@@ -957,7 +953,7 @@ async def _send_pending_notifications(app):
     for uid in ALLOWED_USER_IDS:
         for msg in messages:
             try:
-                await app.bot.send_message(chat_id=uid, text=f"Pattern detected:\n{msg}", parse_mode=ParseMode.MARKDOWN)
+                await app.bot.send_message(chat_id=uid, text=f"Pattern detected:\n{_h(msg)}", parse_mode=ParseMode.HTML)
             except Exception as e:
                 print(f"  [warn] Could not notify {uid}: {e}")
 
