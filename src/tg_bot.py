@@ -8,18 +8,12 @@ Env vars required:
   TG_ALLOWED_USER_IDS           — Comma-separated Telegram user IDs allowed to use the bot
   GOOGLE_SHEETS_SPREADSHEET_ID  — Sheet ID (same as main pipeline)
 
-Commands:
-  /good <url_or_job_id> [note]   — Mark job as good match (writes Verdict to Sheet)
-  /skip <url_or_job_id> <reason> — Mark job as skip (writes Verdict to Sheet)
-  /uncertain <url_or_job_id>     — Flag for manual review (needs more info)
-  /score <url_or_jd_text>        — Score an ad-hoc job and return the decision card
-  /block <keyword>               — Add keyword_block rule to Rules tab
-  /addkw <keyword>               — Add search keyword (keyword_add rule)
-  /rmkw <keyword>                — Deactivate a keyword_add rule
-  /wait <pattern>                — Freeze learning for a pattern
-  /ok <pattern>                  — Unfreeze learning for a pattern
-  /rules                         — List all active rules in the Rules tab
-  /stats                         — Recent pipeline stats from Jobs tab
+Deep-link flows (from email buttons):
+  /start good_<job_id>  → show job card, record Good Match, weekly summary
+  /start skip_<job_id>  → show job card + pre-filled reason buttons from LLM analysis,
+                          user taps or types own reason, then weekly summary
+
+All verdicts overwrite previous ones (latest always wins). Timestamp written to Sheet.
 """
 
 import os
@@ -27,6 +21,7 @@ import sys
 import json
 import asyncio
 import re as _re
+from datetime import datetime, timedelta
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,12 +34,18 @@ if hasattr(sys.stdout, "reconfigure"):
 from dotenv import load_dotenv
 load_dotenv()
 
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters,
+)
 from telegram.constants import ParseMode
 
 from src.sheets import get_client, read_rules
-from src.feedback import record_verdict, apply_weight_adjustments, drain_notifications
+from src.feedback import (
+    record_verdict, apply_weight_adjustments, drain_notifications,
+    load_feedback, get_active_verdicts, _is_skip_signal, _is_good_signal,
+)
 
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
 BOT_TOKEN = os.getenv("TG_JOBSEARCHER_BOT_TOKEN", "")
@@ -61,12 +62,14 @@ ALLOWED_USER_IDS = set(
 
 def _is_allowed(update: Update) -> bool:
     if not ALLOWED_USER_IDS:
-        return True  # open if not configured
+        return True
     return update.effective_user.id in ALLOWED_USER_IDS
 
 
 async def _deny(update: Update):
-    await update.message.reply_text("Not authorized.")
+    msg = update.message or (update.callback_query and update.callback_query.message)
+    if msg:
+        await msg.reply_text("Not authorized.")
 
 
 # ---------------------------------------------------------------------------
@@ -83,17 +86,31 @@ def _get_rules_ws():
     return client.open_by_key(SPREADSHEET_ID).worksheet("Rules")
 
 
+def _parse_ws_headers(ws):
+    """Return deduplicated header list (handles duplicate/empty cells)."""
+    raw = ws.row_values(1)
+    seen, headers = {}, []
+    for i, h in enumerate(raw):
+        key = h.strip() if h.strip() else f"_col{i}"
+        if key in seen:
+            key = f"{key}_{i}"
+        seen[key] = True
+        headers.append(key)
+    return headers
+
+
 def _find_job_row(ws, url_or_id: str):
-    """Return (row_index, record_dict) for the first Jobs row matching url or job_id.
-    row_index is 1-based (gspread convention). Returns (None, None) if not found.
-    """
-    records = ws.get_all_records()
+    """Return (row_index, record_dict) or (None, None). Uses get_all_values for header safety."""
+    all_values = ws.get_all_values()
+    if not all_values:
+        return None, None
+    headers = _parse_ws_headers(ws)
     needle = url_or_id.strip().lower()
-    for i, rec in enumerate(records, start=2):  # row 1 = header
+    for i, row_values in enumerate(all_values[1:], start=2):
+        rec = dict(zip(headers, row_values + [""] * max(0, len(headers) - len(row_values))))
         job_url = str(rec.get("Job URL", "")).lower()
         if needle in job_url:
             return i, rec
-        # Also match numeric job ID in URL
         m = _re.search(r"/(\d{7,})", job_url)
         if m and m.group(1) == needle:
             return i, rec
@@ -101,22 +118,32 @@ def _find_job_row(ws, url_or_id: str):
 
 
 def _write_verdict_to_sheet(ws, row_index: int, verdict: str, reason: str):
-    """Write My Verdict + My Reason into Jobs tab. Columns 31 and 32."""
-    headers = ws.row_values(1)
-    verdict_col = headers.index("My Verdict") + 1 if "My Verdict" in headers else 31
-    reason_col = headers.index("My Reason") + 1 if "My Reason" in headers else 32
+    """Write My Verdict, My Reason, Verdict At into Jobs tab. Adds Verdict At column if missing."""
+    headers = _parse_ws_headers(ws)
+
+    def _col(name, fallback):
+        return (headers.index(name) + 1) if name in headers else fallback
+
+    verdict_col = _col("My Verdict", 31)
+    reason_col = _col("My Reason", 32)
     ws.update_cell(row_index, verdict_col, verdict)
     ws.update_cell(row_index, reason_col, reason)
 
+    # Timestamp column — add header if not present
+    if "Verdict At" in headers:
+        ts_col = headers.index("Verdict At") + 1
+    else:
+        ts_col = len([h for h in headers if not h.startswith("_col")]) + 1
+        ws.update_cell(1, ts_col, "Verdict At")
+    ws.update_cell(row_index, ts_col, datetime.now().strftime("%Y-%m-%d %H:%M"))
+
 
 def _append_rule(rule_type: str, value: str, delta: str = "", note: str = ""):
-    """Append one active rule row to the Rules tab."""
     ws = _get_rules_ws()
     ws.append_row([rule_type, value, delta, "TRUE", note], value_input_option="USER_ENTERED")
 
 
 def _deactivate_rule(rule_type: str, value: str):
-    """Set Active=FALSE for all Rules rows matching type+value."""
     ws = _get_rules_ws()
     records = ws.get_all_records()
     deactivated = 0
@@ -124,52 +151,254 @@ def _deactivate_rule(rule_type: str, value: str):
         if (str(row.get("Type", "")).strip().lower() == rule_type.lower()
                 and str(row.get("Value", "")).strip().lower() == value.lower()
                 and str(row.get("Active", "")).strip().upper() == "TRUE"):
-            ws.update_cell(i, 4, "FALSE")  # Active column
+            ws.update_cell(i, 4, "FALSE")
             deactivated += 1
     return deactivated
 
 
 # ---------------------------------------------------------------------------
-# /good  /skip  /uncertain  — feedback commands
+# Weekly stats helpers
 # ---------------------------------------------------------------------------
 
-async def cmd_good(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def _weekly_stats():
+    """Return (not_fit_count, good_count) for the past 7 days from feedback_log."""
+    cutoff = (datetime.now() - timedelta(days=7)).isoformat()
+    data = load_feedback()
+    active = get_active_verdicts(data)
+    recent = [v for v in active if v.get("timestamp", "") >= cutoff]
+    not_fit = sum(1 for v in recent if _is_skip_signal(v.get("user_verdict", "")))
+    good = sum(1 for v in recent if _is_good_signal(v.get("user_verdict", "")))
+    return not_fit, good
+
+
+def _weekly_summary_line():
+    not_fit, good = _weekly_stats()
+    parts = []
+    if good:
+        parts.append(f"{good} good match{'es' if good > 1 else ''}")
+    if not_fit:
+        parts.append(f"{not_fit} not fit")
+    if not parts:
+        return "No feedback recorded this week yet."
+    return "This week: " + " · ".join(parts) + "."
+
+
+# ---------------------------------------------------------------------------
+# Suggested reasons extractor
+# ---------------------------------------------------------------------------
+
+def _extract_suggested_reasons(rec):
+    """Pull 2-3 short skip reasons from LLM analysis columns (Gap Analysis, Main Risk)."""
+    suggested = []
+    gap_analysis = str(rec.get("Gap Analysis", "")).strip()
+    main_risk = str(rec.get("Main Risk", "")).strip()
+    why_not_fit = str(rec.get("Why Not Fit", "")).strip()
+
+    for source in [gap_analysis, why_not_fit]:
+        for item in source.split(";"):
+            item = item.strip()
+            if item and len(item) > 3 and len(suggested) < 2:
+                suggested.append(item[:45])
+
+    if main_risk and len(suggested) < 3:
+        suggested.append(main_risk[:45])
+
+    return suggested[:3]
+
+
+# ---------------------------------------------------------------------------
+# Deep-link handlers  (called from cmd_start)
+# ---------------------------------------------------------------------------
+
+async def _handle_good_deeplink(update: Update, job_id: str):
+    if not SPREADSHEET_ID:
+        await update.message.reply_text("Sheets not configured.")
+        return
+    try:
+        ws = _get_jobs_ws()
+        row_index, rec = _find_job_row(ws, job_id)
+        if row_index is None:
+            await update.message.reply_text(
+                f"Job `{job_id}` not found in sheet.\n"
+                "It may not have been scored yet — try after the next pipeline run.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+        prev_verdict = str(rec.get("My Verdict", "")).strip()
+        title = str(rec.get("Title", "?"))
+        company = str(rec.get("Company", "?"))
+        score = str(rec.get("Score", "?"))
+
+        _write_verdict_to_sheet(ws, row_index, "Good Match", "Tapped Good match in email")
+        record_verdict(
+            job_url=str(rec.get("Job URL", job_id)),
+            title=title,
+            system_decision=str(rec.get("Decision", "")),
+            system_score=int(rec.get("Score", 0) or 0),
+            user_verdict="Good Match",
+            user_reason="Tapped Good match in email",
+        )
+
+        overwrite = f"\n_Previous verdict: {prev_verdict} — overwritten._" if prev_verdict and prev_verdict != "Good Match" else ""
+        await update.message.reply_text(
+            f"Recorded. *{title}*\n"
+            f"{company} · Score {score}{overwrite}\n\n"
+            f"{_weekly_summary_line()}",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def _handle_skip_deeplink(update: Update, context: ContextTypes.DEFAULT_TYPE, job_id: str):
+    if not SPREADSHEET_ID:
+        await update.message.reply_text("Sheets not configured.")
+        return
+    try:
+        ws = _get_jobs_ws()
+        row_index, rec = _find_job_row(ws, job_id)
+        if row_index is None:
+            await update.message.reply_text(
+                f"Job `{job_id}` not found in sheet.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+        title = str(rec.get("Title", "?"))
+        company = str(rec.get("Company", "?"))
+        score = str(rec.get("Score", "?"))
+        decision = str(rec.get("Decision", "?"))
+        prev_verdict = str(rec.get("My Verdict", "")).strip()
+
+        suggested = _extract_suggested_reasons(rec)
+
+        # Store state in user_data
+        context.user_data["pending_skip"] = {
+            "job_id": job_id,
+            "row_index": row_index,
+            "rec": rec,
+            "suggested": suggested,
+            "ws_title": ws.spreadsheet.id,  # used to reload ws on callback
+        }
+        context.user_data["awaiting_skip_reason"] = False
+
+        # Build inline keyboard
+        keyboard = []
+        for i, reason in enumerate(suggested):
+            display = reason if len(reason) <= 35 else reason[:32] + "…"
+            keyboard.append([InlineKeyboardButton(display, callback_data=f"sr:{i}")])
+        keyboard.append([InlineKeyboardButton("✍️ Type my own reason", callback_data="sr:other")])
+
+        prev_note = f"\n_Previous: {prev_verdict}_" if prev_verdict else ""
+        await update.message.reply_text(
+            f"*Skip: {title}*\n"
+            f"{company} · Score {score} ({decision}){prev_note}\n"
+            f"ID: `{job_id}`\n\n"
+            f"Why are you skipping?",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def handle_skip_reason_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle tap on a suggested reason button or 'Type my own'."""
+    query = update.callback_query
+    await query.answer()
+
     if not _is_allowed(update):
-        return await _deny(update)
-    args = context.args
-    if not args:
-        await update.message.reply_text("Usage: /good <url_or_job_id> [note]")
+        await query.edit_message_text("Not authorized.")
         return
 
-    url_or_id = args[0]
-    note = " ".join(args[1:]) if len(args) > 1 else ""
-    await _write_feedback(update, url_or_id, verdict="Good Match", reason=note or "User marked good")
-
-
-async def cmd_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_allowed(update):
-        return await _deny(update)
-    args = context.args
-    if not args:
-        await update.message.reply_text("Usage: /skip <url_or_job_id> <reason>")
+    pending = context.user_data.get("pending_skip")
+    if not pending:
+        await query.edit_message_text(
+            "Session expired — please tap the Skip button in the email again."
+        )
         return
 
-    url_or_id = args[0]
-    reason = " ".join(args[1:]) if len(args) > 1 else "User skipped"
-    await _write_feedback(update, url_or_id, verdict="Disagree-Skip", reason=reason)
+    data = query.data  # "sr:0", "sr:1", "sr:2", "sr:other"
 
-
-async def cmd_uncertain(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _is_allowed(update):
-        return await _deny(update)
-    args = context.args
-    if not args:
-        await update.message.reply_text("Usage: /uncertain <url_or_job_id>")
+    if data == "sr:other":
+        context.user_data["awaiting_skip_reason"] = True
+        rec = pending["rec"]
+        await query.edit_message_text(
+            f"*Skip: {rec.get('Title', '?')}*\n"
+            f"Type your reason and send it as a message:",
+            parse_mode=ParseMode.MARKDOWN,
+        )
         return
 
-    url_or_id = args[0]
-    await _write_feedback(update, url_or_id, verdict="Uncertain", reason="Needs manual review")
+    try:
+        idx = int(data.split(":")[1])
+        reason = pending["suggested"][idx] if idx < len(pending["suggested"]) else "Skipped from email"
+    except (ValueError, IndexError):
+        reason = "Skipped from email"
 
+    await _commit_skip(query=query, context=context, pending=pending, reason=reason)
+
+
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle typed skip reason after user tapped 'Type my own'."""
+    if not _is_allowed(update):
+        return
+    if not context.user_data.get("awaiting_skip_reason"):
+        return  # not in a skip flow
+
+    pending = context.user_data.get("pending_skip")
+    if not pending:
+        return
+
+    context.user_data["awaiting_skip_reason"] = False
+    reason = update.message.text.strip()
+    await _commit_skip(message=update.message, context=context, pending=pending, reason=reason)
+
+
+async def _commit_skip(context, pending, reason, query=None, message=None):
+    """Write skip verdict to Sheet + feedback_log, reply with confirmation."""
+    rec = pending["rec"]
+    row_index = pending["row_index"]
+    job_id = pending["job_id"]
+    title = str(rec.get("Title", "?"))
+    company = str(rec.get("Company", "?"))
+
+    try:
+        ws = _get_jobs_ws()
+        _write_verdict_to_sheet(ws, row_index, "Disagree-Skip", reason)
+        record_verdict(
+            job_url=str(rec.get("Job URL", job_id)),
+            title=title,
+            system_decision=str(rec.get("Decision", "")),
+            system_score=int(rec.get("Score", 0) or 0),
+            user_verdict="Disagree-Skip",
+            user_reason=reason,
+        )
+    except Exception as e:
+        text = f"Error saving verdict: {e}"
+        if query:
+            await query.edit_message_text(text)
+        elif message:
+            await message.reply_text(text)
+        return
+
+    context.user_data.pop("pending_skip", None)
+
+    text = (
+        f"Recorded. *{title}* @ {company} — Skip\n"
+        f"Reason: _{reason}_\n\n"
+        f"{_weekly_summary_line()}"
+    )
+    if query:
+        await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+    elif message:
+        await message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+# ---------------------------------------------------------------------------
+# /good  /skip  /uncertain  — manual feedback commands (text-based)
+# ---------------------------------------------------------------------------
 
 async def _write_feedback(update: Update, url_or_id: str, verdict: str, reason: str):
     if not SPREADSHEET_ID:
@@ -180,15 +409,13 @@ async def _write_feedback(update: Update, url_or_id: str, verdict: str, reason: 
         row_index, rec = _find_job_row(ws, url_or_id)
         if row_index is None:
             await update.message.reply_text(
-                f"Job not found in sheet: `{url_or_id}`\n"
-                "Tip: use the numeric job ID from the LinkedIn URL.",
+                f"Job not found: `{url_or_id}`\nUse the numeric job ID from the LinkedIn URL.",
                 parse_mode=ParseMode.MARKDOWN,
             )
             return
 
+        prev_verdict = str(rec.get("My Verdict", "")).strip()
         _write_verdict_to_sheet(ws, row_index, verdict, reason)
-
-        # Also persist locally so pattern detection runs without waiting for next sync
         record_verdict(
             job_url=str(rec.get("Job URL", url_or_id)),
             title=str(rec.get("Title", "?")),
@@ -201,12 +428,45 @@ async def _write_feedback(update: Update, url_or_id: str, verdict: str, reason: 
         title = rec.get("Title", "?")
         company = rec.get("Company", "?")
         score = rec.get("Score", "?")
+        overwrite = f"\n_Overwrote: {prev_verdict}_" if prev_verdict and prev_verdict != verdict else ""
         await update.message.reply_text(
-            f"Recorded *{verdict}*\n{title} @ {company} (score {score})\nReason: {reason or '—'}",
+            f"Recorded *{verdict}*\n{title} @ {company} (score {score}){overwrite}\n"
+            f"Reason: {reason or '—'}\n\n{_weekly_summary_line()}",
             parse_mode=ParseMode.MARKDOWN,
         )
     except Exception as e:
-        await update.message.reply_text(f"Error writing verdict: {e}")
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_good(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_allowed(update):
+        return await _deny(update)
+    if not context.args:
+        await update.message.reply_text("Usage: /good <url_or_job_id> [note]")
+        return
+    url_or_id = context.args[0]
+    note = " ".join(context.args[1:]) if len(context.args) > 1 else "Marked good via /good"
+    await _write_feedback(update, url_or_id, verdict="Good Match", reason=note)
+
+
+async def cmd_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_allowed(update):
+        return await _deny(update)
+    if not context.args:
+        await update.message.reply_text("Usage: /skip <url_or_job_id> <reason>")
+        return
+    url_or_id = context.args[0]
+    reason = " ".join(context.args[1:]) if len(context.args) > 1 else "User skipped"
+    await _write_feedback(update, url_or_id, verdict="Disagree-Skip", reason=reason)
+
+
+async def cmd_uncertain(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_allowed(update):
+        return await _deny(update)
+    if not context.args:
+        await update.message.reply_text("Usage: /uncertain <url_or_job_id>")
+        return
+    await _write_feedback(update, context.args[0], verdict="Uncertain", reason="Needs manual review")
 
 
 # ---------------------------------------------------------------------------
@@ -222,49 +482,30 @@ async def cmd_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     arg = " ".join(context.args)
     is_url = arg.startswith("http://") or arg.startswith("https://")
-
-    msg = await update.message.reply_text(
-        "Scoring... this takes ~30s, hold tight."
-    )
+    msg = await update.message.reply_text("Scoring... this takes ~30s, hold tight.")
 
     try:
-        description = ""
-        url = ""
-        title = "Ad-hoc job"
-        company = "Unknown"
-
         if is_url:
-            url = arg.strip()
             import trafilatura
-            downloaded = trafilatura.fetch_url(url)
-            if downloaded:
-                description = trafilatura.extract(downloaded) or ""
+            downloaded = trafilatura.fetch_url(arg.strip())
+            description = trafilatura.extract(downloaded) or "" if downloaded else ""
             if not description:
                 await msg.edit_text("Could not fetch description from URL. Try pasting the JD text directly.")
                 return
+            url = arg.strip()
         else:
             description = arg
             url = "adhoc://manual"
 
-        # Build a minimal job dict
         job_dict = {
-            "title": title,
-            "company": company,
-            "location": "Unknown",
-            "description": description,
-            "job_url": url,
-            "work_mode": "Unknown",
-            "phygital_detected": False,
-            "pure_saas_detected": False,
-            "driver_license_flagged": False,
-            "dutch_mandatory": False,
-            "dutch_nice_to_have": False,
-            "seniority_fit": "Medium",
-            "is_agency": False,
-            "km_visa_mentioned": False,
+            "title": "Ad-hoc job", "company": "Unknown", "location": "Unknown",
+            "description": description, "job_url": url, "work_mode": "Unknown",
+            "phygital_detected": False, "pure_saas_detected": False,
+            "driver_license_flagged": False, "dutch_mandatory": False,
+            "dutch_nice_to_have": False, "seniority_fit": "Medium",
+            "is_agency": False, "km_visa_mentioned": False,
         }
 
-        # Run pre-filters first (to surface filter reasons)
         from src.filters import enrich_and_filter, language_prefilter
         import pandas as pd
         df = pd.DataFrame([job_dict])
@@ -279,60 +520,33 @@ async def cmd_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text(f"Rejected at pre-filter: *{reason}*", parse_mode=ParseMode.MARKDOWN)
             return
 
-        job_row = df.iloc[0].to_dict()
-
-        # LLM score
         from src.matcher import score_job
-        result = await asyncio.get_event_loop().run_in_executor(None, score_job, job_row)
+        result = await asyncio.get_event_loop().run_in_executor(None, score_job, df.iloc[0].to_dict())
 
         card = result.get("CardSummary", {})
         fit = result.get("WhyFit", {})
-        gaps = result.get("Gaps", [])
         trust = result.get("TrustNotes", {})
-
         score = card.get("MatchScore", 0)
         decision = card.get("DecisionHint", "?")
-        top_label = card.get("TopLabel", "")
-        main_risk = card.get("MainRisk", "")
-        blocking = card.get("BlockingAlert", "")
-        role_summary = card.get("RoleSummary", "")
-        confidence = trust.get("Confidence", "?")
-
-        strong = fit.get("StrongMatch", [])
-        partial = fit.get("PartialMatch", [])
-
         lines = [
-            f"*{decision}* — Score: {score}/100 (Confidence: {confidence})",
-            f"_{top_label}_" if top_label else "",
+            f"*{decision}* — {score}/100 (Confidence: {trust.get('Confidence', '?')})",
+            f"_{card.get('TopLabel', '')}_" if card.get("TopLabel") else "",
         ]
-        if role_summary:
-            lines.append(f"\n_{role_summary}_")
-        if blocking:
-            lines.append(f"\n⚠ {blocking}")
-        if main_risk:
-            lines.append(f"Risk: {main_risk}")
+        if card.get("RoleSummary"):
+            lines.append(f"\n_{card['RoleSummary']}_")
+        if card.get("BlockingAlert"):
+            lines.append(f"\n⚠ {card['BlockingAlert']}")
+        if card.get("MainRisk"):
+            lines.append(f"Risk: {card['MainRisk']}")
+        strong = fit.get("StrongMatch", [])
         if strong:
             lines.append("\n*Strong Match:*")
             lines += [f"• {s}" for s in strong]
-        if partial:
-            lines.append("\n*Partial Match:*")
-            lines += [f"• {p}" for p in partial]
+        gaps = result.get("Gaps", [])
         if gaps:
             lines.append("\n*Gaps:*")
             lines += [f"• {g}" for g in gaps]
-
-        # Filter verdict
-        filter_flags = []
-        if job_row.get("phygital_detected"):
-            filter_flags.append("Phygital ✓")
-        if job_row.get("pure_saas_detected"):
-            filter_flags.append("SaaS ⚠")
-        if filter_flags:
-            lines.append(f"\nFlags: {', '.join(filter_flags)}")
-
-        text = "\n".join(l for l in lines if l)
-        await msg.edit_text(text, parse_mode=ParseMode.MARKDOWN)
-
+        await msg.edit_text("\n".join(l for l in lines if l), parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         await msg.edit_text(f"Scoring failed: {e}")
 
@@ -349,8 +563,8 @@ async def cmd_block(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     keyword = " ".join(context.args)
     try:
-        _append_rule("keyword_block", keyword, note=f"Added via Telegram by {update.effective_user.username}")
-        await update.message.reply_text(f"Blocked keyword: *{keyword}*\nJobs mentioning this will be hard-rejected.", parse_mode=ParseMode.MARKDOWN)
+        _append_rule("keyword_block", keyword, note=f"Added via TG by {update.effective_user.username}")
+        await update.message.reply_text(f"Blocked: *{keyword}*", parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
@@ -363,11 +577,8 @@ async def cmd_addkw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     keyword = " ".join(context.args)
     try:
-        _append_rule("keyword_add", keyword, note=f"Added via Telegram by {update.effective_user.username}")
-        await update.message.reply_text(
-            f"Added search keyword: *{keyword}*\nWill be included in the next pipeline run.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        _append_rule("keyword_add", keyword, note=f"Added via TG by {update.effective_user.username}")
+        await update.message.reply_text(f"Added keyword: *{keyword}*", parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
@@ -381,10 +592,8 @@ async def cmd_rmkw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyword = " ".join(context.args)
     try:
         n = _deactivate_rule("keyword_add", keyword)
-        if n:
-            await update.message.reply_text(f"Deactivated keyword: *{keyword}*", parse_mode=ParseMode.MARKDOWN)
-        else:
-            await update.message.reply_text(f"No active keyword_add rule found for: {keyword}")
+        msg = f"Deactivated: *{keyword}*" if n else f"No active keyword found: {keyword}"
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
@@ -393,13 +602,13 @@ async def cmd_wait(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update):
         return await _deny(update)
     if not context.args:
-        await update.message.reply_text("Usage: /wait <pattern>  — freeze learning for this pattern")
+        await update.message.reply_text("Usage: /wait <pattern>")
         return
     pattern = " ".join(context.args)
     try:
-        _append_rule("wait", pattern, note=f"Learning freeze via Telegram")
+        _append_rule("wait", pattern, note="Learning freeze via TG")
         await update.message.reply_text(
-            f"Learning frozen for: *{pattern}*\nUse /ok {pattern} to unfreeze.",
+            f"Learning frozen: *{pattern}*\nUse /ok {pattern} to unfreeze.",
             parse_mode=ParseMode.MARKDOWN,
         )
     except Exception as e:
@@ -410,15 +619,13 @@ async def cmd_ok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update):
         return await _deny(update)
     if not context.args:
-        await update.message.reply_text("Usage: /ok <pattern>  — unfreeze learning")
+        await update.message.reply_text("Usage: /ok <pattern>")
         return
     pattern = " ".join(context.args)
     try:
         n = _deactivate_rule("wait", pattern)
-        if n:
-            await update.message.reply_text(f"Learning unfrozen for: *{pattern}*", parse_mode=ParseMode.MARKDOWN)
-        else:
-            await update.message.reply_text(f"No active wait rule found for: {pattern}")
+        msg = f"Unfrozen: *{pattern}*" if n else f"No active wait found: {pattern}"
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
 
@@ -431,7 +638,7 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update):
         return await _deny(update)
     if not SPREADSHEET_ID:
-        await update.message.reply_text("GOOGLE_SHEETS_SPREADSHEET_ID not configured.")
+        await update.message.reply_text("Sheets not configured.")
         return
     try:
         rules = read_rules(SPREADSHEET_ID)
@@ -442,64 +649,67 @@ async def cmd_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 lines.append(f"  {dim}: {delta:+d}")
         if rules["keyword_blocks"]:
             lines.append("\nKeyword blocks:")
-            for kw in rules["keyword_blocks"]:
-                lines.append(f"  ✗ {kw}")
+            lines += [f"  ✗ {kw}" for kw in rules["keyword_blocks"]]
         if rules["keyword_adds"]:
-            lines.append("\nSearch keywords added:")
-            for kw in rules["keyword_adds"]:
-                lines.append(f"  + {kw}")
+            lines.append("\nSearch keywords:")
+            lines += [f"  + {kw}" for kw in rules["keyword_adds"]]
         if rules["company_boosts"]:
             lines.append("\nCompany boosts:")
-            for co, delta in rules["company_boosts"].items():
-                lines.append(f"  {co}: {delta:+d}")
+            lines += [f"  {co}: {d:+d}" for co, d in rules["company_boosts"].items()]
         if rules["company_demotes"]:
             lines.append("\nCompany demotes:")
-            for co, delta in rules["company_demotes"].items():
-                lines.append(f"  {co}: {delta:+d}")
+            lines += [f"  {co}: {d:+d}" for co, d in rules["company_demotes"].items()]
+        if rules["frozen_patterns"]:
+            lines.append("\nFrozen (learning paused):")
+            lines += [f"  ⏸ {p}" for p in rules["frozen_patterns"]]
         if len(lines) == 1:
             lines.append("No active rules.")
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
-        await update.message.reply_text(f"Error reading rules: {e}")
+        await update.message.reply_text(f"Error: {e}")
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update):
         return await _deny(update)
     if not SPREADSHEET_ID:
-        await update.message.reply_text("GOOGLE_SHEETS_SPREADSHEET_ID not configured.")
+        await update.message.reply_text("Sheets not configured.")
         return
     try:
         ws = _get_jobs_ws()
-        records = ws.get_all_records()
-        if not records:
+        all_values = ws.get_all_values()
+        if len(all_values) < 2:
             await update.message.reply_text("No jobs in sheet yet.")
             return
 
+        headers = _parse_ws_headers(ws)
+        records = [dict(zip(headers, r + [""] * max(0, len(headers) - len(r)))) for r in all_values[1:]]
+
         from collections import Counter
         decisions = Counter(str(r.get("Decision", "")).strip() for r in records)
-        verdicts = Counter(str(r.get("My Verdict", "")).strip() for r in records if r.get("My Verdict"))
+        verdicts = Counter(str(r.get("My Verdict", "")).strip() for r in records if r.get("My Verdict", "").strip())
 
-        # Last 7 days
-        from datetime import datetime, timedelta
         cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
         recent = [r for r in records if str(r.get("Date", "")) >= cutoff]
-        recent_decisions = Counter(str(r.get("Decision", "")) for r in recent)
+        recent_dec = Counter(str(r.get("Decision", "")) for r in recent)
+
+        not_fit, good = _weekly_stats()
 
         lines = [
             f"*Stats — {len(records)} total jobs*\n",
             "All time:",
             f"  Apply: {decisions.get('Apply', 0)}  Maybe: {decisions.get('Maybe', 0)}  Skip: {decisions.get('Skip', 0)}",
             f"\nLast 7 days ({len(recent)} jobs):",
-            f"  Apply: {recent_decisions.get('Apply', 0)}  Maybe: {recent_decisions.get('Maybe', 0)}  Skip: {recent_decisions.get('Skip', 0)}",
+            f"  Apply: {recent_dec.get('Apply', 0)}  Maybe: {recent_dec.get('Maybe', 0)}  Skip: {recent_dec.get('Skip', 0)}",
+            f"\nYour feedback this week:",
+            f"  Good match: {good}  Not fit: {not_fit}",
         ]
         if verdicts:
-            lines.append(f"\nYour verdicts:")
+            lines.append("\nAll verdicts:")
             for v, n in verdicts.most_common():
                 if v:
                     lines.append(f"  {v}: {n}")
 
-        # Learned weight adjustments
         adj = apply_weight_adjustments()
         if adj:
             lines.append("\nLearned adjustments:")
@@ -508,7 +718,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
-        await update.message.reply_text(f"Error fetching stats: {e}")
+        await update.message.reply_text(f"Error: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -518,24 +728,27 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 HELP_TEXT = """\
 *Jobsearcher Bot*
 
-Feedback:
-  /good <url\\_or\\_id> [note]   — Mark as good match
-  /skip <url\\_or\\_id> <reason> — Mark as skip
-  /uncertain <url\\_or\\_id>     — Flag for manual review
+From email buttons:
+  Tap *Good match* or *Skip* → guided feedback flow with suggested reasons
+
+Manual feedback:
+  /good <id> [note]   — Mark as good match
+  /skip <id> <reason> — Mark as skip
+  /uncertain <id>     — Flag for review
 
 Ad-hoc:
-  /score <url\\_or\\_jd>         — Score any job on the spot
+  /score <url\\_or\\_jd> — Score any job
 
 Rules:
-  /block <keyword>    — Hard-reject jobs mentioning keyword
-  /addkw <keyword>    — Add search keyword for next run
-  /rmkw <keyword>     — Remove a search keyword
-  /wait <pattern>     — Freeze learning for a pattern
-  /ok <pattern>       — Unfreeze learning
+  /block <kw>   — Hard-reject jobs with this keyword
+  /addkw <kw>   — Add search keyword
+  /rmkw <kw>    — Remove search keyword
+  /wait <pat>   — Freeze learning for pattern
+  /ok <pat>     — Unfreeze
 
 Info:
-  /rules   — Show active rules
-  /stats   — Pipeline stats + your feedback history
+  /rules — Active rules
+  /stats — Pipeline stats + your feedback
 """
 
 
@@ -543,22 +756,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_allowed(update):
         return await _deny(update)
 
-    # Handle deep links from email buttons: /start good_<job_id>  or  /start skip_<job_id>
     if context.args:
         param = context.args[0]
         if param.startswith("good_"):
-            job_id = param[5:]
-            await _write_feedback(update, job_id, verdict="Good Match", reason="Tapped from email digest")
+            await _handle_good_deeplink(update, param[5:])
             return
         if param.startswith("skip_"):
-            job_id = param[5:]
-            # Ask for reason via follow-up (record default now, user can refine with /skip)
-            await _write_feedback(update, job_id, verdict="Disagree-Skip", reason="Skipped from email digest")
-            await update.message.reply_text(
-                f"Recorded Skip for job `{job_id}`.\n"
-                f"Add a reason with: `/skip {job_id} <reason>`",
-                parse_mode=ParseMode.MARKDOWN,
-            )
+            await _handle_skip_deeplink(update, context, param[5:])
             return
 
     await update.message.reply_text(HELP_TEXT, parse_mode=ParseMode.MARKDOWN)
@@ -569,7 +773,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 
 async def _send_pending_notifications(app):
-    """Drain pending_notifications.json and send each message to allowed users."""
     messages = drain_notifications()
     if not messages or not ALLOWED_USER_IDS:
         return
@@ -578,7 +781,7 @@ async def _send_pending_notifications(app):
             try:
                 await app.bot.send_message(chat_id=uid, text=f"Pattern detected:\n{msg}", parse_mode=ParseMode.MARKDOWN)
             except Exception as e:
-                print(f"  [warn] Could not send TG notification to {uid}: {e}")
+                print(f"  [warn] Could not notify {uid}: {e}")
 
 
 def main():
@@ -586,7 +789,7 @@ def main():
         print("ERROR: TG_JOBSEARCHER_BOT_TOKEN is not set in .env")
         sys.exit(1)
     if not SPREADSHEET_ID:
-        print("WARNING: GOOGLE_SHEETS_SPREADSHEET_ID not set — Sheets commands won't work")
+        print("WARNING: GOOGLE_SHEETS_SPREADSHEET_ID not set")
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.post_init = _send_pending_notifications
@@ -604,6 +807,12 @@ def main():
     app.add_handler(CommandHandler("ok", cmd_ok))
     app.add_handler(CommandHandler("rules", cmd_rules))
     app.add_handler(CommandHandler("stats", cmd_stats))
+
+    # Inline keyboard handler for skip reason buttons
+    app.add_handler(CallbackQueryHandler(handle_skip_reason_callback, pattern=r"^sr:"))
+
+    # Text message handler — only active when awaiting a typed skip reason
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
     print(f"Jobsearcher bot running (allowed users: {ALLOWED_USER_IDS or 'all'})")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
