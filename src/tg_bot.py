@@ -100,20 +100,56 @@ def _parse_ws_headers(ws):
 
 
 def _find_job_row(ws, url_or_id: str):
-    """Return (row_index, record_dict) or (None, None). Uses get_all_values for header safety."""
+    """Return (row_index, record_dict) or (None, None). Uses get_all_values for header safety.
+
+    Search strategy:
+    1. needle substring in "Job URL" cell (fast, exact column match)
+    2. regex digit-run in any cell that looks like a URL (handles column name mismatches)
+    3. needle appears anywhere in any cell of the row (last resort)
+    """
     all_values = ws.get_all_values()
     if not all_values:
         return None, None
-    headers = _parse_ws_headers(ws)
+    headers = list(all_values[0])  # use headers from same response, avoid extra API call
+    # Deduplicate headers in-place
+    seen, clean_headers = {}, []
+    for idx, h in enumerate(headers):
+        key = h.strip() if h.strip() else f"_col{idx}"
+        if key in seen:
+            key = f"{key}_{idx}"
+        seen[key] = True
+        clean_headers.append(key)
+
     needle = url_or_id.strip().lower()
-    for i, row_values in enumerate(all_values[1:], start=2):
-        rec = dict(zip(headers, row_values + [""] * max(0, len(headers) - len(row_values))))
-        job_url = str(rec.get("Job URL", "")).lower()
-        if needle in job_url:
-            return i, rec
-        m = _re.search(r"/(\d{7,})", job_url)
-        if m and m.group(1) == needle:
-            return i, rec
+    # Which column index (0-based) is "Job URL"?
+    url_col_idx = next(
+        (i for i, h in enumerate(clean_headers) if h.strip().lower() in ("job url", "joburl", "url")),
+        None,
+    )
+
+    for row_num, row_values in enumerate(all_values[1:], start=2):
+        padded = row_values + [""] * max(0, len(clean_headers) - len(row_values))
+        rec = dict(zip(clean_headers, padded))
+
+        # Strategy 1: known URL column
+        if url_col_idx is not None and url_col_idx < len(row_values):
+            cell = row_values[url_col_idx].lower()
+            if needle in cell:
+                return row_num, rec
+
+        # Strategy 2: any cell that looks like a URL and contains the digit run
+        for cell in row_values:
+            cell_l = cell.lower()
+            if ("http" in cell_l or "linkedin" in cell_l) and needle in cell_l:
+                return row_num, rec
+
+        # Strategy 3: digit-run regex match against any URL-like cell
+        for cell in row_values:
+            if "http" in cell.lower():
+                m = _re.search(r"/(\d{7,})", cell)
+                if m and m.group(1) == needle:
+                    return row_num, rec
+
     return None, None
 
 
@@ -218,19 +254,16 @@ async def _handle_good_deeplink(update: Update, job_id: str):
         ws = _get_jobs_ws()
         row_index, rec = _find_job_row(ws, job_id)
         if row_index is None:
-            await update.message.reply_text(
-                f"Job `{job_id}` not found in sheet.\n"
-                "It may not have been scored yet — try after the next pipeline run.",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-            return
+            rec = {}
+            ws = None  # skip sheet write
 
         prev_verdict = str(rec.get("My Verdict", "")).strip()
-        title = str(rec.get("Title", "?"))
-        company = str(rec.get("Company", "?"))
+        title = str(rec.get("Title", f"Job {job_id}"))
+        company = str(rec.get("Company", ""))
         score = str(rec.get("Score", "?"))
 
-        _write_verdict_to_sheet(ws, row_index, "Good Match", "Tapped Good match in email")
+        if ws is not None and row_index is not None:
+            _write_verdict_to_sheet(ws, row_index, "Good Match", "Tapped Good match in email")
         record_verdict(
             job_url=str(rec.get("Job URL", job_id)),
             title=title,
@@ -259,14 +292,13 @@ async def _handle_skip_deeplink(update: Update, context: ContextTypes.DEFAULT_TY
         ws = _get_jobs_ws()
         row_index, rec = _find_job_row(ws, job_id)
         if row_index is None:
-            await update.message.reply_text(
-                f"Job `{job_id}` not found in sheet.",
-                parse_mode=ParseMode.MARKDOWN,
-            )
-            return
+            # Job not in sheet (may be from an older digest or dedup-skipped).
+            # Still let user record feedback in feedback_log.
+            rec = {}
+            ws = None
 
-        title = str(rec.get("Title", "?"))
-        company = str(rec.get("Company", "?"))
+        title = str(rec.get("Title", f"Job {job_id}"))
+        company = str(rec.get("Company", "Unknown company"))
         score = str(rec.get("Score", "?"))
         decision = str(rec.get("Decision", "?"))
         prev_verdict = str(rec.get("My Verdict", "")).strip()
@@ -276,10 +308,9 @@ async def _handle_skip_deeplink(update: Update, context: ContextTypes.DEFAULT_TY
         # Store state in user_data
         context.user_data["pending_skip"] = {
             "job_id": job_id,
-            "row_index": row_index,
+            "row_index": row_index,  # may be None if not found in sheet
             "rec": rec,
             "suggested": suggested,
-            "ws_title": ws.spreadsheet.id,  # used to reload ws on callback
         }
         context.user_data["awaiting_skip_reason"] = False
 
@@ -359,14 +390,15 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _commit_skip(context, pending, reason, query=None, message=None):
     """Write skip verdict to Sheet + feedback_log, reply with confirmation."""
     rec = pending["rec"]
-    row_index = pending["row_index"]
+    row_index = pending.get("row_index")  # None if job wasn't found in sheet
     job_id = pending["job_id"]
-    title = str(rec.get("Title", "?"))
-    company = str(rec.get("Company", "?"))
+    title = str(rec.get("Title", f"Job {job_id}"))
+    company = str(rec.get("Company", ""))
 
     try:
-        ws = _get_jobs_ws()
-        _write_verdict_to_sheet(ws, row_index, "Disagree-Skip", reason)
+        if row_index is not None:
+            ws = _get_jobs_ws()
+            _write_verdict_to_sheet(ws, row_index, "Disagree-Skip", reason)
         record_verdict(
             job_url=str(rec.get("Job URL", job_id)),
             title=title,
