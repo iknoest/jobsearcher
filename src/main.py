@@ -527,7 +527,74 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
             })
         keyword_stats.sort(key=lambda x: x["apply"] + x["maybe"], reverse=True)
 
-    output_path = send_email(jobs, filtered_count=filtered_count, keyword_stats=keyword_stats)
+    # Trust-first digest (R4-02) when sub-score data is present, legacy otherwise.
+    if "recommendation" in jobs.columns:
+        from src.digest import (
+            compute_bottleneck,
+            compute_funnel,
+            compute_pending_feedback,
+            load_last_digest_snapshot,
+            render_trust_digest,
+            save_last_digest_snapshot,
+            summarize_recent_feedback,
+        )
+        from src.feedback import load_feedback
+
+        # Build funnel from the counters we've been tracking
+        apply_df = jobs[jobs["recommendation"] == "Apply"]
+        review_df = jobs[jobs["recommendation"] == "Review"]
+        skip_df = jobs[jobs["recommendation"] == "Skip"]
+
+        scored_mask = jobs["drop_stage"].astype(str) == "scored" if "drop_stage" in jobs.columns else None
+        scored_df = jobs[scored_mask] if scored_mask is not None else jobs
+        avg_hard_skill = (
+            float(scored_df["score_hard_skill"].mean())
+            if "score_hard_skill" in scored_df.columns and len(scored_df) > 0
+            else None
+        )
+
+        funnel = compute_funnel(
+            total_scraped=total_scraped,
+            pre_scoring_filtered=filtered_count,
+            scored_total=int(sub_counters.get("scored_ok", 0) + sub_counters.get("missing_jd", 0)),
+            scored_but_skip=len(skip_df),
+            below_max_jobs_cap=len(dropped_by_cap) if isinstance(dropped_by_cap, pd.DataFrame) else 0,
+            apply_count=len(apply_df),
+            review_count=len(review_df),
+        )
+        bottleneck_headline = compute_bottleneck(funnel, avg_hard_skill=avg_hard_skill)
+
+        # Pending + summary: diff against previous snapshot
+        last_snap = load_last_digest_snapshot()
+        feedback_data = load_feedback()
+        pending = compute_pending_feedback(last_snap, feedback_data)
+        summary = summarize_recent_feedback(
+            feedback_data,
+            since_timestamp=last_snap.get("generated_at") if last_snap else None,
+        )
+
+        html = render_trust_digest(
+            jobs,
+            funnel=funnel,
+            bottleneck_headline=bottleneck_headline,
+            pending_feedback=pending,
+            feedback_summary=summary,
+            keyword_stats=keyword_stats,
+        )
+        output_path = send_email(
+            df=jobs,
+            filtered_count=filtered_count,
+            keyword_stats=keyword_stats,
+            html_body=html,
+        )
+
+        # Save snapshot so next digest's "pending feedback" block knows what we showed.
+        surfaced = pd.concat([apply_df, review_df], ignore_index=True)
+        borderline = skip_df[skip_df["final_score"].between(45, 49)] if "final_score" in skip_df.columns else skip_df.iloc[:0]
+        snapshot_rows = pd.concat([surfaced, borderline], ignore_index=True).to_dict(orient="records")
+        save_last_digest_snapshot(snapshot_rows)
+    else:
+        output_path = send_email(jobs, filtered_count=filtered_count, keyword_stats=keyword_stats)
     print(f"  -> {time.time() - t0:.0f}s")
 
     print("\n" + "=" * 60)

@@ -325,13 +325,33 @@ def _canonical_url(rec: dict, job_id: str) -> str:
         return stored
     return f"https://www.linkedin.com/jobs/view/{job_id}"
 
-# Fixed categories always available in the skip flow (in order)
+# Quick-reject taxonomy (R4-02, user-locked 2026-04-23).
+# First-layer 1-tap reasons. User can still "Add note" for free text.
+# Order matches the 5 groups from the trust-first spec; flattened for the
+# InlineKeyboard (Telegram renders best as a flat list with submit button).
 _SKIP_CATEGORIES = [
+    # Fit mismatch
+    "Too technical / engineering-heavy",
+    "Wrong role focus",
+    "Too much strategy ownership",
+    "Too much people management",
+    "Too coordination / alignment-heavy",
+    # Scope / level
+    "Too junior",
+    "Too senior",
+    "Unclear ownership / title misleading",
+    # Domain
     "Wrong industry / sector",
-    "Missing hardware · phygital domain",
-    "Role scope or seniority doesn't fit",
-    "Company culture / size doesn't fit",
-    "Location or commute concern",
+    "Too software / SaaS-focused",
+    "Too simulation / specialist-heavy",
+    # Practical
+    "Commute / work mode",
+    "Salary concerns",
+    "Language requirement",
+    "Driving licence / other practical",
+    # Personal
+    "Company not interesting",
+    "Duplicate / already reviewed",
 ]
 
 
@@ -540,10 +560,48 @@ async def handle_skip_reason_callback(update: Update, context: ContextTypes.DEFA
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle typed note during skip flow. Adds note to selection, re-shows keyboard."""
+    """Handle typed notes during skip flow AND standalone Note deep-link (R4-02)."""
     if not _is_allowed(update):
         return
 
+    # ── Standalone Note deep-link branch ────────────────────────────
+    if context.user_data.get("awaiting_note_text"):
+        context.user_data["awaiting_note_text"] = False
+        rec = context.user_data.get("note_rec") or {}
+        row_index = context.user_data.get("note_row_index")
+        job_id = context.user_data.get("note_job_id") or ""
+        title = str(rec.get("Title", f"Job {job_id}"))
+        company = str(rec.get("Company", ""))
+        note_text = (update.message.text or "").strip()
+        if not note_text:
+            await update.message.reply_text("Note was empty — nothing saved.")
+            return
+        try:
+            job_url = _canonical_url(rec, job_id)
+            if row_index is not None:
+                ws = _get_jobs_ws()
+                _write_verdict_to_sheet(ws, row_index, "Note", note_text)
+            record_verdict(
+                job_url=job_url,
+                title=title,
+                company=company,
+                system_decision=str(rec.get("Decision", "")),
+                system_score=int(rec.get("Score", 0) or 0),
+                user_verdict="Note",
+                user_reason=note_text,
+            )
+            await update.message.reply_text(
+                f"📝 Note saved for <b>{_h(title)}</b>.",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception as e:
+            await update.message.reply_text(f"Error saving note: {_h(str(e))[:120]}", parse_mode=ParseMode.HTML)
+        # Clear note-flow state
+        for k in ("note_rec", "note_row_index", "note_job_id"):
+            context.user_data.pop(k, None)
+        return
+
+    # ── Existing skip-flow free-text branch ──────────────────────────
     # Restore from disk if in-memory state was lost (bot restart between note prompt and reply)
     if not context.user_data.get("pending_skip"):
         restored = _load_pending_skip(update.effective_user.id)
@@ -1051,8 +1109,41 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if param.startswith("skip_"):
             await _handle_skip_deeplink(update, context, param[5:])
             return
+        if param.startswith("note_"):
+            await _handle_note_deeplink(update, context, param[5:])
+            return
 
     await update.message.reply_text(HELP_TEXT, parse_mode=ParseMode.HTML)
+
+
+async def _handle_note_deeplink(update: Update, context: ContextTypes.DEFAULT_TYPE, job_id: str):
+    """R4-02 Note action: ask for free text, store with user_verdict='Note'.
+
+    Note is NOT a Keep or Reject signal — it's an annotation. src/feedback.py
+    _is_good_signal / _is_skip_signal already ignore it (neither matcher fires
+    on "note"), so Note verdicts don't trigger pattern weight adjustments.
+    """
+    if not SPREADSHEET_ID:
+        await update.message.reply_text("Sheets not configured.")
+        return
+    try:
+        ws = _get_jobs_ws()
+        row_index, rec = _find_job_row(ws, job_id)
+    except Exception as e:
+        await update.message.reply_text(f"Lookup failed: {_h(str(e))[:120]}", parse_mode=ParseMode.HTML)
+        return
+    context.user_data["note_job_id"] = job_id
+    context.user_data["note_rec"] = rec or {}
+    context.user_data["note_row_index"] = row_index
+    context.user_data["awaiting_note_text"] = True
+
+    title = str((rec or {}).get("Title", "")) or f"Job {job_id}"
+    company = str((rec or {}).get("Company", ""))
+    await update.message.reply_text(
+        f"📝 Add a note for <b>{_h(title)}</b>{' @ ' + _h(company) if company else ''}:\n"
+        f"Type your note and send. No verdict will be recorded — just the annotation.",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 # ---------------------------------------------------------------------------

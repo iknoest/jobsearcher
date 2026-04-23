@@ -14,7 +14,7 @@ Automated job search tool for the Netherlands market. Scrapes, filters, and scor
 - **KM Visa**: IND recognized sponsor register (cached locally, 30-day refresh, rapidfuzz match).
 - **Storage**: Google Sheets (job tracking, dedup, feedback sync) + local JSON cache.
 - **Feedback Loop (redesign in progress)**: Single source of truth = Google Sheets. Telegram bot is a thin client writing into the same Sheets tabs. Planned tabs: `Jobs`, `Inbox` (ad-hoc JD drop), `Rules` (dynamic weights + keyword overrides), `Feedback` (append-only verdict log). 1-sample weight nudge by default; autonomous pattern detection on top.
-- **Delivery**: Email digest (daily cron + manual). Apply/Maybe cards + "Uncertain" section (LLM self-flags low confidence). Skip tier is aggregated, not per-row.
+- **Delivery (R4-02 trust-first digest)**: `src/digest/` module renders Apply/Review/Skip from R3-05 sub-scores. Per-card 6 sub-score bars + deterministic "✅ Why Apply" / "⚠ Watch-outs" (Apply) or "What's holding this back?" / "Still worth a look because…" (Review). Skip section collapsed with top reasons + "Borderline skips worth audit" subsection (45-49 score band). 3-band funnel (FILTERED / SCORED BUT NOT SURFACED / SCORED & SURFACED). Optional bottleneck headline. Pending-feedback block from previous digest + feedback theme-cluster summary. **No LLM used for any explanation.** Card actions: Open JD / Keep / Reject / Note via Telegram deep-links (`good_<id>` / `skip_<id>` / `note_<id>`). Legacy `build_email_html` still fires when a row lacks R3-05 columns.
 
 ## Scoring Framework
 - **Score (0-100)** — used for ranking. Phygital 0-40 · Seniority 0-20 · Domain 0-15 · Research 0-10 · Company 0-10 · Language -15 · Driver -10 · Pure SaaS -40.
