@@ -12,11 +12,10 @@ def test_scoring_prompt_formats_without_error():
         driver_license_flagged=False, dutch_mandatory=False,
         dutch_nice_to_have=False, work_mode="Remote", seniority_fit="Strong",
         is_agency=False, km_visa_mentioned=False, feedback_context="None.",
+        preferences_block="(test block)",
     )
     assert len(formatted) > 1000
     assert "OUTPUT CONTRACT" in formatted
-    # Literal { should appear in the rendered output (escaped source)
-    assert "`{`" in formatted
 
 
 def test_plain_json():

@@ -16,11 +16,16 @@ n8n-data/
 profile/
 output/
 MasterCV_Coverletter/
+Ava_previousCV_project_works_coverletter/
+personal_job_search_assistant_prd.md
+# feedback_log.json holds user verdicts with real company names + reasoning
+# → keep out of git; config/feedback_log.example.json is the skeleton
+config/feedback_log.json
 
 # Google service account credentials
 *.json
 !config/km_sponsors.json
-!config/feedback_log.json
+!config/feedback_log.example.json
 
 # Claude internal
 .claude/

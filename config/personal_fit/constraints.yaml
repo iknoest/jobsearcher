@@ -1,0 +1,262 @@
+# Personal constraints — policy layer for job eligibility.
+# Consumed by src/filters/eligibility.py (to be built in R2-x) and existing
+# detectors in src/filters.py, src/travel.py, src/km_visa.py.
+#
+# Consolidates constraint logic previously scattered across:
+#   - config/profile.yaml       (factual profile)
+#   - config/preferences.yaml   (work-style; seniority target/caution)
+#   - config/search.yaml        (filter.skip_if_requires)
+#   - src/filters.py            (inline hard-coded logic)
+#
+# DESIGN RULES (locked 2026-04-20):
+#   - Config defines policy (rules, thresholds, penalties).
+#   - Code defines implementation (detection functions, routing, travel lookup).
+#   - `detector:` values are references to functions, not implementations.
+#   - action_on_violation semantics: reject | penalize | flag | bonus
+#
+# Per-constraint schema:
+#   id                  unique snake_case identifier
+#   scope               language | licence | commute | seniority | location | visa
+#   type                hard | soft
+#   description         human-readable one-liner
+#   trigger             detection block:
+#                         phrases_any      — searches title + JD blob (any match triggers)
+#                         title_patterns   — regex list; searches TITLE FIELD ONLY
+#                         detector         — named function reference (runs in code, not here)
+#                         threshold_*      — numeric bounds for commute / seniority
+#                         phrases_any_in_role_context — stricter; must co-occur with role-defining phrases
+#   action_on_violation reject | penalize | flag | bonus
+#   penalty             int ≤ 0 (for penalize; optional)
+#   bonus               int ≥ 0 (for bonus; optional)
+#   flag_name           identifier for downstream routing (for flag/bonus; optional)
+#   reason_template     shown in decision card; may contain {placeholders}
+#   enabled             true | false (default true)
+
+# ══════════════════════════════════════════════════════════════
+# USER CONTEXT (anchor for detectors; sourced from profile.yaml)
+# ══════════════════════════════════════════════════════════════
+user_context:
+  home_city: Hoofddorp
+  home_country: Netherlands
+  target_country: Netherlands
+  allow_remote_outside_nl: true
+  languages_spoken: [English, Mandarin, Cantonese]
+  languages_unsupported: [Dutch, German, French]
+  driving_licence: false
+  years_experience: 8
+  visa_status: no_sponsorship_required
+
+# ══════════════════════════════════════════════════════════════
+# CONSTRAINTS
+# ══════════════════════════════════════════════════════════════
+constraints:
+
+  # ── LANGUAGE ────────────────────────────────────────────────
+  - id: dutch_mandatory
+    scope: language
+    type: hard
+    description: "JD requires fluent Dutch / vloeiend Nederlands as mandatory"
+    trigger:
+      phrases_any:
+        - "dutch required"
+        - "dutch is required"
+        - "dutch mandatory"
+        - "fluent dutch"
+        - "vloeiend nederlands"
+        - "verplicht nederlands"
+        - "native dutch"
+      detectors_any:
+        - jd_primarily_dutch       # langid-based, src/filters.language_prefilter
+        - dutch_title              # Dutch title keywords
+    action_on_violation: reject
+    reason_template: "Dutch fluency required (Ava does not speak Dutch)"
+
+  - id: german_mandatory
+    scope: language
+    type: hard
+    description: "JD requires fluent German"
+    trigger:
+      phrases_any:
+        - "german required"
+        - "fluent german"
+        - "deutsch erforderlich"
+        - "fließend deutsch"
+        - "native german"
+    action_on_violation: reject
+    reason_template: "German fluency required"
+
+  - id: french_mandatory
+    scope: language
+    type: hard
+    description: "JD requires fluent French"
+    trigger:
+      phrases_any:
+        - "french required"
+        - "fluent french"
+        - "français courant"
+        - "couramment français"
+        - "native french"
+    action_on_violation: reject
+    reason_template: "French fluency required"
+
+  - id: dutch_preferred
+    scope: language
+    type: soft
+    description: "JD mentions Dutch as preferred / nice-to-have"
+    trigger:
+      phrases_any:
+        - "dutch preferred"
+        - "dutch is a plus"
+        - "nederlands is een pre"
+        - "dutch nice to have"
+        - "dutch language a plus"
+    action_on_violation: penalize
+    penalty: -5
+    reason_template: "Dutch preferred — adds friction"
+
+  # ── LOCATION ────────────────────────────────────────────────
+  - id: location_outside_nl_non_remote
+    scope: location
+    type: hard
+    description: "Job is outside NL AND is not fully remote (existing pipeline Step 2.5)"
+    trigger:
+      detector: location_filter    # existing logic in src/filters.py
+    action_on_violation: reject
+    reason_template: "Outside NL and not remote"
+
+  # ── DRIVING LICENCE ─────────────────────────────────────────
+  - id: driving_licence_required
+    scope: licence
+    type: soft
+    description: "JD requires driving licence / rijbewijs (penalize, do NOT hard-filter per user rule)"
+    trigger:
+      phrases_any:
+        - "driving licence required"
+        - "driving license required"
+        - "driver's licence required"
+        - "driver's license required"
+        - "valid driving licence"
+        - "rijbewijs vereist"
+        - "rijbewijs b"
+        - "must have driving licence"
+    action_on_violation: penalize
+    penalty: -10
+    reason_template: "Driving licence required (Ava has no licence)"
+
+  # ── COMMUTE ─────────────────────────────────────────────────
+  - id: commute_onsite_too_far
+    scope: commute
+    type: soft
+    description: "Onsite role with public-transport commute from Hoofddorp > 90 min"
+    trigger:
+      work_mode: onsite
+      threshold_minutes: 90
+      detector: travel_minutes_lookup    # src/travel.py
+    action_on_violation: penalize
+    penalty_per_min_over: -0.5
+    penalty_cap: -15
+    reason_template: "Long onsite commute (~{minutes} min one-way)"
+
+  - id: commute_hybrid_too_far
+    scope: commute
+    type: soft
+    description: "Hybrid role with public-transport commute from Hoofddorp > 60 min"
+    trigger:
+      work_mode: hybrid
+      threshold_minutes: 60
+      detector: travel_minutes_lookup
+    action_on_violation: penalize
+    penalty_per_min_over: -0.3
+    penalty_cap: -8
+    reason_template: "Long hybrid commute (~{minutes} min one-way)"
+
+  # ── SENIORITY ───────────────────────────────────────────────
+  - id: seniority_entry_level_role
+    scope: seniority
+    type: hard
+    description: "Clearly entry-level: intern / graduate / trainee / stagiair. Per user rule 2026-04-20, blanket 'junior' is NOT hard-rejected — only unambiguous entry-level cases."
+    trigger:
+      title_patterns:
+        - "\\bintern\\b"
+        - "\\bstagiair\\b"
+        - "\\bgraduate (trainee|program|role)\\b"
+        - "\\btrainee\\b"
+      phrases_any_in_role_context:
+        - "internship program"
+        - "graduate program"
+        - "graduate trainee"
+        - "student internship"
+        - "recent graduate"
+    action_on_violation: reject
+    reason_template: "Entry-level / internship / graduate role (Ava has 8+ years)"
+
+  - id: seniority_junior_ambiguous
+    scope: seniority
+    type: soft
+    description: "Title contains 'junior' or 'jr.' — ambiguous (may be a pay grade, not necessarily entry-level). Route to Review with penalty and seniority_mismatch flag per user rule 2026-04-20."
+    trigger:
+      title_patterns:
+        - "\\b(junior|jr\\.?)\\b"
+    action_on_violation: penalize
+    penalty: -8
+    flag_name: seniority_mismatch
+    reason_template: "Title marked 'junior' — ambiguous seniority, routed to Review"
+
+  - id: seniority_caution_head_of
+    scope: seniority
+    type: soft
+    description: "Head of / VP of / Director of — too management-heavy; routed to 'Seniority mismatch' action (migrated from preferences.yaml 2026-04-20)"
+    trigger:
+      title_patterns:
+        - "\\bhead of\\b"
+        - "\\bvp of\\b"
+        - "\\bvice president of\\b"
+        - "\\bdirector of\\b"
+        - "\\bchief [a-z]+ officer\\b"
+    action_on_violation: flag
+    flag_name: seniority_mismatch
+    reason_template: "{title_match} — too management-heavy for Senior→Lead target"
+
+  - id: seniority_target_mid_level
+    scope: seniority
+    type: soft
+    description: "Role explicitly targets mid-level / medior — below Senior target but worth seeing"
+    trigger:
+      phrases_any:
+        - "2-4 years"
+        - "3-5 years"
+        - "mid-level"
+        - "medior"
+    action_on_violation: penalize
+    penalty: -3
+    reason_template: "Target is mid-level; Ava has 8+ years"
+
+  # ── VISA ────────────────────────────────────────────────────
+  - id: km_visa_eligible
+    scope: visa
+    type: soft
+    description: "Company is KM Visa (Highly Skilled Migrant) registered sponsor — proxy for salary quality"
+    trigger:
+      detector: ind_sponsor_register_match    # src/km_visa.py
+    action_on_violation: bonus
+    bonus: 2
+    flag_name: km_visa_eligible
+    reason_template: "KM Visa sponsor (salary proxy — informational, small bonus only)"
+
+# ══════════════════════════════════════════════════════════════
+# EVALUATION BEHAVIOUR
+# ══════════════════════════════════════════════════════════════
+evaluator_defaults:
+  # Consumed by src/filters/eligibility.py (R2-x).
+  # Order of evaluation: hard constraints first (short-circuit on reject),
+  # then soft constraints (accumulate penalty/bonus/flags).
+  hard_first: true
+  max_reasons_in_card: 3
+  # When computing final score:
+  #   final_score = aggregate_subscores + sum(soft_penalties) + sum(soft_bonuses)
+  #   subject to 0 <= final_score <= 100
+  clip_final_score: [0, 100]
+  # Flags propagate to the decision card regardless of score impact:
+  propagate_flags:
+    - seniority_mismatch
+    - km_visa_eligible

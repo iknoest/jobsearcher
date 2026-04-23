@@ -29,6 +29,12 @@ title_bonus:
 # --- Title keyword penalties ---
 title_penalty:
   "software": -20
+  "system engineer": -15          # systems integration/testing roles, not product-facing
+  "systems engineer": -15
+  "test engineer": -15            # QA/validation roles — not Ava's domain
+  "testing engineer": -15
+  "deployment engineer": -15      # infra/ops, not product
+  "manufacturing engineer": -15   # factory floor, not product design
 
 # --- Preferred companies (case-insensitive, substring match on company name) ---
 # Companies you'd happily work at — gets a strong bonus regardless of title.
@@ -78,3 +84,34 @@ skill_bonus:
   "sensor": 6
   "embedded": 5
   "cad": 4
+  # --- V1 4-block: green-flag hints mapped to work-style dimensions ---
+  "rapid prototyping": 8           # InnovationFit + HandsOnProximity
+  "hands-on": 7                    # HandsOnProximity
+  "player-coach": 10               # HandsOnProximity (explicit Ava preference)
+  "0 to 1": 8                      # InnovationFit (0->1 mandate)
+  "0-to-1": 8
+  "zero to one": 8
+  "experimentation": 6             # InnovationFit
+  "end-to-end": 6                  # ownership / HandsOnProximity
+  "cross-disciplinary": 5          # TeamStyleFit (IDEO-style)
+  "small team": 5                  # TeamStyleFit
+  "lean team": 5                   # TeamStyleFit
+  "research owner": 8              # ResearchFit
+  "product vision": 6              # StrategyFit
+  "discovery": 5                   # ResearchFit adjacent
+
+# --- Anti-pattern penalties (substring match against JD text) ---
+# Signals that Ava's preferences.yaml lists under 'avoid' — mild demotes so
+# marginally-matched roles drop below the pre-rank cutoff before LLM spend.
+description_penalty:
+  "stakeholder alignment": -8      # AlignmentBurden signal
+  "cross-functional alignment": -8
+  "roadmap prioritization across teams": -6
+  "matrix organization": -8        # AlignmentBurden
+  "waterfall": -10                 # ProcessHeaviness
+  "compliance-driven": -6          # ProcessHeaviness
+  "approval gates": -6
+  "consensus-driven": -6           # AlignmentBurden
+  "management consulting": -8      # traditional consulting (not IDEO-style)
+  "sales-led": -6                  # product plays second fiddle
+  "execution-only": -8             # avoid bucket

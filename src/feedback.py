@@ -56,7 +56,7 @@ def save_feedback(data, feedback_path=None):
 
 
 def record_verdict(job_url, title, system_decision, system_score,
-                   user_verdict, user_reason, feedback_path=None):
+                   user_verdict, user_reason, company="", feedback_path=None):
     """Record a user verdict. If same URL exists, supersede the old entry."""
     data = load_feedback(feedback_path)
     now = datetime.now().isoformat()
@@ -70,6 +70,7 @@ def record_verdict(job_url, title, system_decision, system_score,
     data["user_verdicts"].append({
         "job_url": job_url,
         "title": title,
+        "company": company,
         "system_decision": system_decision,
         "system_score": system_score,
         "user_verdict": user_verdict,

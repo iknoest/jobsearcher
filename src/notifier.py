@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import re as _re
+import hashlib as _hashlib
 import urllib.parse as _urlparse
 
 def _format_job_type(job_type):
@@ -35,14 +36,21 @@ def _format_job_type(job_type):
 
 
 def _job_id_from_url(url):
-    """Extract a short job ID from a job URL.
-    LinkedIn: https://www.linkedin.com/jobs/view/4400368636 -> '4400368636'
-    Other: URL-safe hash.
+    """Extract a short Telegram-safe job ID from a job URL.
+
+    Telegram's ?start= param allows only [A-Za-z0-9_-], max 64 chars.
+    LinkedIn: /jobs/view/4400368636  -> '4400368636'   (numeric, ≤20 chars)
+    Indeed:   ?jk=9313891bd465cdf7  -> 'in_9313891bd465cdf7'  (prefix + 16 hex)
+    Other:    MD5 hash prefix        -> 'hx_<12 hex chars>'
     """
-    m = _re.search(r"/jobs/view/(\d+)", str(url))
+    url = str(url)
+    m = _re.search(r"/jobs/view/(\d+)", url)
     if m:
         return m.group(1)
-    return _urlparse.quote(str(url), safe="")
+    m = _re.search(r"[?&]jk=([A-Za-z0-9]+)", url)
+    if m:
+        return "in_" + m.group(1)
+    return "hx_" + _hashlib.md5(url.encode()).hexdigest()[:12]
 
 EMAIL_TEMPLATE = """
 <!DOCTYPE html>
@@ -113,6 +121,23 @@ EMAIL_TEMPLATE = """
   .role-summary { font-size: 12px; color: #515154; font-style: italic; margin: 0 0 8px; padding: 6px 8px; background: #f5f5f7; border-radius: 6px; line-height: 1.5; }
   .sec-body li.gap { color: #b36b00; }
   .sec-body li.risk { color: #c5221f; }
+  .sec-body li.green { color: #1b7a2d; }
+  .sec-body li.red { color: #c5221f; }
+
+  /* --- V1 4-block redesign: dimensions, anti-pattern, suggested action --- */
+  .dim-line { font-size: 11px; color: #515154; margin: 4px 0 6px; line-height: 1.6; }
+  .ap-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 8px; margin-right: 6px; }
+  .ap-badge.risk-low { background: #e8f8ec; color: #1b7a2d; }
+  .ap-badge.risk-med { background: #fff3e0; color: #b36b00; }
+  .ap-badge.risk-high { background: #fce8e6; color: #c5221f; }
+  .ap-reason { font-size: 11px; color: #515154; }
+  .action-pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 10px; }
+  .action-pill.act-strong { background: #1b7a2d; color: #fff; }
+  .action-pill.act-apply  { background: #34c759; color: #fff; }
+  .action-pill.act-review { background: #ff9f0a; color: #fff; }
+  .action-pill.act-risky  { background: #e4572e; color: #fff; }
+  .action-pill.act-senior { background: #7b1fa2; color: #fff; }
+  .action-pill.act-skip   { background: #86868b; color: #fff; }
 
   /* --- LAYER 3: Detail (collapsed feel) --- */
   .L3 { background: #fafafa; padding: 10px 16px 12px; border-top: 1px solid #f0f0f2; }
@@ -204,7 +229,7 @@ EMAIL_TEMPLATE = """
         <div class="company-line">{{ j.company }}{% if j.industry %} · {{ j.industry }}{% endif %}</div>
         <div class="top-label">{{ j.top_label }}</div>
       </div>
-      <span class="pill {{ j.decision_class }}">{{ j.hint }}</span>
+      {% if j.suggested_action %}<span class="action-pill {{ j.action_class }}">{{ j.suggested_action }}</span>{% else %}<span class="pill {{ j.decision_class }}">{{ j.hint }}</span>{% endif %}
     </div>
 
     {% if j.blocking %}
@@ -227,6 +252,13 @@ EMAIL_TEMPLATE = """
     <div class="risk-line">{{ j.main_risk }}</div>
     {% endif %}
 
+    {% if j.anti_pattern_level %}
+    <div style="margin-top:6px;">
+      <span class="ap-badge {{ j.anti_pattern_class }}">Risk: {{ j.anti_pattern_level }}</span>
+      {% if j.anti_pattern_reason %}<span class="ap-reason">{{ j.anti_pattern_reason }}</span>{% endif %}
+    </div>
+    {% endif %}
+
     {% if j.key_skills %}
     <div class="skill-chips">
       {% for sk in j.key_skills %}<span class="skill-chip skill-neutral">{{ sk }}</span> {% endfor %}
@@ -239,7 +271,23 @@ EMAIL_TEMPLATE = """
     {% if j.role_summary %}
     <div class="role-summary">{{ j.role_summary }}</div>
     {% endif %}
-    {% if j.strong_match or j.partial_match %}
+    {% if j.dimensions_line %}
+    <div class="dim-line">{{ j.dimensions_line }}</div>
+    {% endif %}
+    {% if j.green_flags or j.red_flags %}
+    <div class="sec">
+      <div class="sec-title">Green Flags</div>
+      <div class="sec-body"><ul>
+        {% for g in j.green_flags %}<li class="green">{{ g }}</li>{% endfor %}
+      </ul></div>
+    </div>
+    {% if j.red_flags %}
+    <div class="sec">
+      <div class="sec-title">Red Flags</div>
+      <div class="sec-body"><ul>{% for r in j.red_flags %}<li class="red">{{ r }}</li>{% endfor %}</ul></div>
+    </div>
+    {% endif %}
+    {% elif j.strong_match or j.partial_match %}
     <div class="sec">
       <div class="sec-title">Why Fit</div>
       <div class="sec-body"><ul>
@@ -249,14 +297,14 @@ EMAIL_TEMPLATE = """
     </div>
     {% endif %}
 
-    {% if j.gaps %}
+    {% if j.gaps and not (j.green_flags or j.red_flags) %}
     <div class="sec">
       <div class="sec-title">Gaps</div>
       <div class="sec-body"><ul>{% for g in j.gaps %}<li class="gap">{{ g }}</li>{% endfor %}</ul></div>
     </div>
     {% endif %}
 
-    {% if j.risks %}
+    {% if j.risks and not (j.green_flags or j.red_flags) %}
     <div class="sec">
       <div class="sec-title">Risks</div>
       <div class="sec-body"><ul>{% for r in j.risks %}<li class="risk">{{ r }}</li>{% endfor %}</ul></div>
@@ -325,7 +373,7 @@ EMAIL_TEMPLATE = """
         <div class="company-line">{{ j.company }}{% if j.industry %} · {{ j.industry }}{% endif %}</div>
         <div class="top-label">{{ j.top_label }}</div>
       </div>
-      <span class="pill {{ j.decision_class }}">{{ j.hint }}</span>
+      {% if j.suggested_action %}<span class="action-pill {{ j.action_class }}">{{ j.suggested_action }}</span>{% else %}<span class="pill {{ j.decision_class }}">{{ j.hint }}</span>{% endif %}
     </div>
     {% if j.blocking %}<div class="blocking">{{ j.blocking }}</div>{% endif %}
     <div class="signals">
@@ -340,6 +388,7 @@ EMAIL_TEMPLATE = """
       {% if j.driver_flagged %} <span class="chip c-amber">Driving Licence</span>{% endif %}
     </div>
     {% if j.main_risk %}<div class="risk-line">{{ j.main_risk }}</div>{% endif %}
+    {% if j.anti_pattern_level %}<div style="margin-top:6px;"><span class="ap-badge {{ j.anti_pattern_class }}">Risk: {{ j.anti_pattern_level }}</span>{% if j.anti_pattern_reason %}<span class="ap-reason">{{ j.anti_pattern_reason }}</span>{% endif %}</div>{% endif %}
     {% if j.key_skills %}
     <div class="skill-chips">{% for sk in j.key_skills %}<span class="skill-chip skill-neutral">{{ sk }}</span> {% endfor %}</div>
     {% endif %}
@@ -348,15 +397,19 @@ EMAIL_TEMPLATE = """
   <!-- LAYER 2: Fast Explanation -->
   <div class="L2">
     {% if j.role_summary %}<div class="role-summary">{{ j.role_summary }}</div>{% endif %}
-    {% if j.strong_match or j.partial_match %}
+    {% if j.dimensions_line %}<div class="dim-line">{{ j.dimensions_line }}</div>{% endif %}
+    {% if j.green_flags or j.red_flags %}
+    <div class="sec"><div class="sec-title">Green Flags</div><div class="sec-body"><ul>{% for g in j.green_flags %}<li class="green">{{ g }}</li>{% endfor %}</ul></div></div>
+    {% if j.red_flags %}<div class="sec"><div class="sec-title">Red Flags</div><div class="sec-body"><ul>{% for r in j.red_flags %}<li class="red">{{ r }}</li>{% endfor %}</ul></div></div>{% endif %}
+    {% elif j.strong_match or j.partial_match %}
     <div class="sec"><div class="sec-title">Why Fit</div>
       <div class="sec-body"><ul>
         {% for s in j.strong_match %}<li class="strong">{{ s }}</li>{% endfor %}
         {% for s in j.partial_match %}<li class="partial">~ {{ s }}</li>{% endfor %}
       </ul></div>
     </div>{% endif %}
-    {% if j.gaps %}<div class="sec"><div class="sec-title">Gaps</div><div class="sec-body"><ul>{% for g in j.gaps %}<li class="gap">{{ g }}</li>{% endfor %}</ul></div></div>{% endif %}
-    {% if j.risks %}<div class="sec"><div class="sec-title">Risks</div><div class="sec-body"><ul>{% for r in j.risks %}<li class="risk">{{ r }}</li>{% endfor %}</ul></div></div>{% endif %}
+    {% if j.gaps and not (j.green_flags or j.red_flags) %}<div class="sec"><div class="sec-title">Gaps</div><div class="sec-body"><ul>{% for g in j.gaps %}<li class="gap">{{ g }}</li>{% endfor %}</ul></div></div>{% endif %}
+    {% if j.risks and not (j.green_flags or j.red_flags) %}<div class="sec"><div class="sec-title">Risks</div><div class="sec-body"><ul>{% for r in j.risks %}<li class="risk">{{ r }}</li>{% endfor %}</ul></div></div>{% endif %}
   </div>
 
   <!-- LAYER 3: Detail -->
@@ -403,6 +456,7 @@ EMAIL_TEMPLATE = """
       {% if j.km_visa %} <span class="chip c-green">KM Visa</span>{% endif %}
     </div>
     {% if j.main_risk %}<div class="risk-line">{{ j.main_risk }}</div>{% endif %}
+    {% if j.anti_pattern_level %}<div style="margin-top:6px;"><span class="ap-badge {{ j.anti_pattern_class }}">Risk: {{ j.anti_pattern_level }}</span>{% if j.anti_pattern_reason %}<span class="ap-reason">{{ j.anti_pattern_reason }}</span>{% endif %}</div>{% endif %}
     {% if j.key_skills %}
     <div class="skill-chips">{% for sk in j.key_skills %}<span class="skill-chip skill-neutral">{{ sk }}</span> {% endfor %}</div>
     {% endif %}
@@ -410,14 +464,18 @@ EMAIL_TEMPLATE = """
 
   <div class="L2">
     {% if j.role_summary %}<div class="role-summary">{{ j.role_summary }}</div>{% endif %}
-    {% if j.strong_match or j.partial_match %}
+    {% if j.dimensions_line %}<div class="dim-line">{{ j.dimensions_line }}</div>{% endif %}
+    {% if j.green_flags or j.red_flags %}
+    <div class="sec"><div class="sec-title">Green Flags (uncertain)</div><div class="sec-body"><ul>{% for g in j.green_flags %}<li class="green">{{ g }}</li>{% endfor %}</ul></div></div>
+    {% if j.red_flags %}<div class="sec"><div class="sec-title">Red Flags</div><div class="sec-body"><ul>{% for r in j.red_flags %}<li class="red">{{ r }}</li>{% endfor %}</ul></div></div>{% endif %}
+    {% elif j.strong_match or j.partial_match %}
     <div class="sec"><div class="sec-title">Why Fit (uncertain)</div>
       <div class="sec-body"><ul>
         {% for s in j.strong_match %}<li class="strong">{{ s }}</li>{% endfor %}
         {% for s in j.partial_match %}<li class="partial">~ {{ s }}</li>{% endfor %}
       </ul></div>
     </div>{% endif %}
-    {% if j.gaps %}<div class="sec"><div class="sec-title">Gaps</div><div class="sec-body"><ul>{% for g in j.gaps %}<li class="gap">{{ g }}</li>{% endfor %}</ul></div></div>{% endif %}
+    {% if j.gaps and not (j.green_flags or j.red_flags) %}<div class="sec"><div class="sec-title">Gaps</div><div class="sec-body"><ul>{% for g in j.gaps %}<li class="gap">{{ g }}</li>{% endfor %}</ul></div></div>{% endif %}
     {% if j.missing_info %}<div class="sec"><div class="sec-title">Missing info</div><div class="sec-body" style="color:#86868b;">{{ j.missing_info | join(' · ') }}</div></div>{% endif %}
   </div>
 
@@ -450,8 +508,35 @@ EMAIL_TEMPLATE = """
 """
 
 
+_DIM_DISPLAY = [
+    ("ResearchFit",      "Research"),
+    ("InnovationFit",    "Innovation"),
+    ("HandsOnProximity", "Hands-on"),
+    ("StrategyFit",      "Strategy"),
+    ("AlignmentBurden",  "Alignment risk"),
+    ("ProcessHeaviness", "Process risk"),
+    ("TeamStyleFit",     "Team fit"),
+]
+
+_ACTION_CLASS = {
+    "Strong Apply":         "act-strong",
+    "Apply":                "act-apply",
+    "Review":               "act-review",
+    "Skip":                 "act-skip",
+    "Good role, risky org": "act-risky",
+    "Seniority mismatch":   "act-senior",
+}
+
+_RISK_CLASS = {"Low": "risk-low", "Medium": "risk-med", "High": "risk-high"}
+
+
 def _parse_card(row):
-    """Parse match_result JSON into template-ready dict."""
+    """Parse match_result JSON into template-ready dict.
+
+    Supports both schemas:
+    - New (V1): Dimensions + GreenFlags + RedFlags + AntiPatternRisk + SuggestedAction
+    - Old: WhyFit + Gaps + Risks
+    """
     r = {}
     try:
         r = json.loads(row.get("match_result", "{}"))
@@ -460,20 +545,37 @@ def _parse_card(row):
 
     card = r.get("CardSummary", {})
     sig = r.get("DecisionSignals", {})
-    fit = r.get("WhyFit", {})
+    fit = r.get("WhyFit", {}) or {}
     phy = r.get("PhygitalAssessment", {})
     co = r.get("CompanySnapshot", {})
     sb = r.get("ScoreBreakdown", {})
     trust = r.get("TrustNotes", {})
+    dims = r.get("Dimensions", {}) or {}
+    risk = r.get("AntiPatternRisk", {}) or {}
 
     score = card.get("MatchScore", row.get("match_score", 0))
     hint = card.get("DecisionHint", row.get("decision_hint", "Skip"))
+    suggested_action = card.get("SuggestedAction", "") or row.get("suggested_action", "")
 
     lang_text = sig.get("LanguageText", "Unknown")
     lang_class = "ok" if "OK" in lang_text else ("risk" if "Mandatory" in lang_text else "pref")
 
     phy_level = phy.get("Level", "Weak")
     phy_class = {"Strong": "phy-strong", "Moderate": "phy-moderate"}.get(phy_level, "phy-weak")
+
+    # Build compact dimensions line: "Research 4/5 · Innovation 5/5 · ..."
+    dim_parts = []
+    for key, label in _DIM_DISPLAY:
+        d = dims.get(key)
+        if isinstance(d, dict) and "score" in d:
+            try:
+                s = int(d["score"])
+                dim_parts.append(f"{label} {s}/5")
+            except (ValueError, TypeError):
+                pass
+    dimensions_line = " · ".join(dim_parts)
+
+    risk_level = (risk.get("Level") or "").strip().capitalize() or row.get("anti_pattern_risk", "")
 
     return {
         "title": row.get("title", ""),
@@ -505,11 +607,21 @@ def _parse_card(row):
         "phygital_reason": phy.get("Reason", ""),
         # Role summary (what this job actually does, in English)
         "role_summary": card.get("RoleSummary", ""),
-        # WhyFit
+        # --- Old schema (WhyFit/Gaps/Risks) — kept for legacy rows ---
         "strong_match": fit.get("StrongMatch", []),
         "partial_match": fit.get("PartialMatch", []),
         "gaps": r.get("Gaps", []),
         "risks": r.get("Risks", []),
+        # --- New schema (4-block V1) ---
+        "dimensions_line": dimensions_line,
+        "green_flags": r.get("GreenFlags", []),
+        "red_flags": r.get("RedFlags", []),
+        "anti_pattern_level": risk_level,
+        "anti_pattern_reason": risk.get("Reason", ""),
+        "anti_pattern_class": _RISK_CLASS.get(risk_level, ""),
+        "suggested_action": suggested_action,
+        "action_class": _ACTION_CLASS.get(suggested_action, ""),
+        # Shared
         "key_skills": r.get("KeySkills", []),
         # Company
         "co_industry": co.get("Industry", ""),

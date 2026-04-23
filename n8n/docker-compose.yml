@@ -17,16 +17,3 @@ services:
       - ../n8n-data:/home/node/.n8n
       - ..:/home/node/jobsearcher
     working_dir: /home/node/jobsearcher
-
-  tg-bot:
-    image: python:3.11-slim
-    restart: unless-stopped
-    working_dir: /app
-    volumes:
-      - ..:/app
-    env_file:
-      - ../.env
-    command: >
-      sh -c "pip install -r requirements.txt -q && python src/tg_bot.py"
-    depends_on:
-      - n8n

@@ -30,11 +30,20 @@ HEADERS = [
     "Top Label", "Main Risk", "Confidence",
     "Job URL", "Travel Link", "Search Keyword",
     "My Verdict", "My Reason",
+    # V1 of 4-block redesign (appended at end for backward compat):
+    "Suggested Action", "Anti-Pattern Risk",
+    "Dim Research", "Dim Innovation", "Dim Hands-on",
+    "Dim Strategy", "Dim Alignment Risk", "Dim Process Risk", "Dim Team Fit",
 ]
 
 
 def _extract_from_match_result(row):
-    """Extract structured fields from the LLM match_result JSON."""
+    """Extract structured fields from the LLM match_result JSON.
+
+    Supports both schemas:
+    - New (V1 4-block): Dimensions + GreenFlags + RedFlags + AntiPatternRisk + SuggestedAction
+    - Old (pre-redesign): WhyFit.StrongMatch/PartialMatch + Gaps + Risks
+    """
     try:
         r = json.loads(row.get("match_result", "{}"))
     except (json.JSONDecodeError, TypeError):
@@ -42,17 +51,29 @@ def _extract_from_match_result(row):
 
     card = r.get("CardSummary", {})
     sig = r.get("DecisionSignals", {})
-    fit = r.get("WhyFit", {})
     phy = r.get("PhygitalAssessment", {})
     co = r.get("CompanySnapshot", {})
     trust = r.get("TrustNotes", {})
+    dims = r.get("Dimensions", {}) or {}
+    risk = r.get("AntiPatternRisk", {}) or {}
+
+    # Green/Red flags (new) fall back to WhyFit + Gaps/Risks (old) for legacy rows
+    green = r.get("GreenFlags", [])
+    red = r.get("RedFlags", [])
+    if not green and not red:
+        fit = r.get("WhyFit", {}) or {}
+        green = fit.get("StrongMatch", []) + fit.get("PartialMatch", [])
+        red = (r.get("Gaps", []) or []) + (r.get("Risks", []) or [])
+
+    def _dim(name):
+        return dims.get(name, {}).get("score", "")
 
     return {
         "industry": co.get("Industry", ""),
         "company_size": co.get("Size", ""),
-        "why_fit": "; ".join(fit.get("StrongMatch", []) + fit.get("PartialMatch", [])),
-        "why_not_fit": "; ".join(r.get("Gaps", []) + r.get("Risks", [])),
-        "gap_analysis": "; ".join(r.get("Gaps", [])),
+        "why_fit": "; ".join(green),
+        "why_not_fit": "; ".join(red),
+        "gap_analysis": "; ".join(r.get("Gaps", []) or []),
         "phygital_level": phy.get("Level", ""),
         "phygital_reason": phy.get("Reason", ""),
         "top_label": card.get("TopLabel", ""),
@@ -62,6 +83,15 @@ def _extract_from_match_result(row):
         "salary_llm": sig.get("SalaryText", ""),
         "commute_llm": sig.get("CommuteText", ""),
         "language_llm": sig.get("LanguageText", ""),
+        "suggested_action": card.get("SuggestedAction", ""),
+        "anti_pattern_risk": risk.get("Level", ""),
+        "dim_research": _dim("ResearchFit"),
+        "dim_innovation": _dim("InnovationFit"),
+        "dim_handson": _dim("HandsOnProximity"),
+        "dim_strategy": _dim("StrategyFit"),
+        "dim_alignment_burden": _dim("AlignmentBurden"),
+        "dim_process_heavy": _dim("ProcessHeaviness"),
+        "dim_team_style": _dim("TeamStyleFit"),
     }
 
 
@@ -151,6 +181,15 @@ def append_jobs(df, spreadsheet_id, sheet_name="Jobs"):
             str(row.get("search_keyword", "")),                 # Search Keyword
             "",                                                 # My Verdict (user fills)
             "",                                                 # My Reason (user fills)
+            llm["suggested_action"],                            # Suggested Action
+            llm["anti_pattern_risk"],                           # Anti-Pattern Risk
+            str(llm["dim_research"]),                           # Dim Research
+            str(llm["dim_innovation"]),                         # Dim Innovation
+            str(llm["dim_handson"]),                            # Dim Hands-on
+            str(llm["dim_strategy"]),                           # Dim Strategy
+            str(llm["dim_alignment_burden"]),                   # Dim Alignment Risk
+            str(llm["dim_process_heavy"]),                      # Dim Process Risk
+            str(llm["dim_team_style"]),                         # Dim Team Fit
         ])
 
     if new_rows:
@@ -172,11 +211,37 @@ RULES_HEADERS = [
 ]
 
 
+def _repair_jobs_headers(spreadsheet):
+    """If the Jobs tab exists but has stale/misaligned headers, update row 1 to match HEADERS.
+
+    This repairs the 'Industry column missing' bug where adding Industry to HEADERS after
+    the sheet was created caused every subsequent column (including Job URL) to be written
+    one position to the right of its header label.
+    """
+    try:
+        ws = spreadsheet.worksheet("Jobs")
+        current = ws.row_values(1)
+        # Pad to the same length for comparison
+        current_trimmed = [h.strip() for h in current if h.strip()]
+        expected_trimmed = [h.strip() for h in HEADERS]
+        if current_trimmed != expected_trimmed:
+            ws.update("A1", [HEADERS])
+            print(f"  Repaired Jobs header row ({len(current_trimmed)} → {len(expected_trimmed)} columns)")
+    except gspread.WorksheetNotFound:
+        pass  # will be created below
+    except Exception as e:
+        print(f"  [warn] Could not repair Jobs headers: {e}")
+
+
 def setup_tabs(spreadsheet_id):
     """Create Inbox and Rules tabs if they don't exist. Safe to call on every run."""
     try:
         client = get_client()
         spreadsheet = client.open_by_key(spreadsheet_id)
+
+        # Repair Jobs header row if schema has changed since the sheet was created
+        _repair_jobs_headers(spreadsheet)
+
         existing = {ws.title for ws in spreadsheet.worksheets()}
 
         if "Inbox" not in existing:

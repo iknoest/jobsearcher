@@ -1,0 +1,339 @@
+# Personal industry taxonomy + proximity-to-Ava (single-column, PRD §14).
+# Consumed by src/classify/industry.py (R2-02) and src/score/industry_proximity.py (R3-03).
+#
+# DESIGN RULES (locked 2026-04-20):
+#   - Single-column proximity: each industry has one 0.0-1.0 score vs. Ava's combined background.
+#   - Industry NEVER hard-rejects. Hard rejects come from roles.yaml (forbidden families),
+#     skills.yaml (forbidden core skills), constraints.yaml (language/licence/seniority).
+#     Industry ONLY raises / lowers / disambiguates fit.
+#   - Unknown industry = 4/10 (neutral-low). Alive for Review, not floated up to Apply.
+#   - Classifier precedence: company_hints → jd_hints → "unknown".
+#
+# Per-entry schema:
+#   canonical_name        (required; snake_case id used in code)
+#   display_name          (human-readable label shown in email cards)
+#   nace_code             (NACE Rev 2.1 section/division where applicable)
+#   proximity_to_ava      (0.0 = very far, 1.0 = same industry as Ava's verified work)
+#   rationale             (one sentence: why this proximity value)
+#   jd_hints              (keyword phrases signalling this industry if found in JD)
+#   company_hints         (lowercase company name substrings; strongest classifier signal)
+#   related_role_families (optional; roles.yaml entries typical for this industry)
+
+# ══════════════════════════════════════════════════════════════
+# ANCHORS — Ava's verified background industries
+# ══════════════════════════════════════════════════════════════
+ava_anchors:
+  - automotive
+  - consumer_electronics
+  - robotics
+  - smart_wearables
+  - iot_connected_devices
+  - industrial_hardware_manufacturing
+
+# ══════════════════════════════════════════════════════════════
+# INDUSTRIES
+# ══════════════════════════════════════════════════════════════
+industries:
+
+  # ── 1.0: Ava anchors ────────────────────────────────────────
+  - canonical_name: automotive
+    display_name: Automotive / Mobility
+    nace_code: "C29"
+    proximity_to_ava: 1.0
+    rationale: "Senior Product Researcher at BYD Europe — EV/PHEV product research"
+    jd_hints: [automotive, electric vehicle, ev/phev, phev, vehicle electrification, powertrain, battery electric, car manufacturer, mobility oem, automotive oem]
+    company_hints: [byd, tesla, volvo, polestar, bmw, mercedes-benz, volkswagen, audi, porsche, stellantis, ford, renault, nissan, toyota, hyundai, nio, rivian, lucid, lotus, xpeng, ferrari, jaguar land rover]
+    related_role_families: [product_researcher, product_manager, product_engineer_hardware]
+
+  - canonical_name: consumer_electronics
+    display_name: Consumer Electronics
+    nace_code: "C26"
+    proximity_to_ava: 1.0
+    rationale: "DFO Global (smart wearables), Raymond Industrial, Jetta — end-user hardware product experience"
+    jd_hints: [consumer electronics, consumer product, connected consumer device, smart device, connected appliance]
+    company_hints: [philips personal, philips consumer, samsung electronics, lg electronics, sony, panasonic, tcl, xiaomi, huawei consumer, bose, sennheiser, logitech, garmin, jbl, harman]
+    related_role_families: [product_manager, product_researcher, product_engineer_hardware]
+
+  - canonical_name: robotics
+    display_name: Robotics
+    nace_code: "C28"
+    proximity_to_ava: 1.0
+    rationale: "R&D Engineer at Jetta (robotics) + applied robotics across R&D roles"
+    jd_hints: [robotics, robot system, industrial robot, service robot, autonomous robot, cobots, humanoid robot]
+    company_hints: [abb robotics, kuka, fanuc, universal robots, boston dynamics, agility robotics, anybotics, rivelin, franka emika, abb ltd]
+    related_role_families: [research_engineer, product_engineer_hardware, innovation_engineer]
+
+  - canonical_name: smart_wearables
+    display_name: Smart Wearables / Consumer Health Wearable
+    nace_code: "C26"
+    proximity_to_ava: 1.0
+    rationale: "DFO Global smart wearables background; PRD §14 split: consumer-health wearables stay close"
+    jd_hints: [smart wearable, wearable device, fitness tracker, smartwatch, consumer health wearable, wearable sensor, hearables]
+    company_hints: [whoop, oura, fitbit, garmin wearables, apple health, philips health wearable, withings, omron healthcare consumer, jabra, hearing hardware]
+    related_role_families: [product_manager, product_researcher, product_engineer_hardware]
+
+  - canonical_name: iot_connected_devices
+    display_name: IoT / Connected Devices
+    nace_code: "C26"
+    proximity_to_ava: 1.0
+    rationale: "Project Engineer (IoT) at previous role; sensor integration patents"
+    jd_hints: [iot, internet of things, connected device, embedded iot, iot platform, smart sensor network, industrial iot, iiot]
+    company_hints: [bosch iot, siemens mindsphere, ptc, nordic semiconductor, particle.io, balena]
+    related_role_families: [product_engineer_hardware, technical_product_manager]
+
+  - canonical_name: industrial_hardware_manufacturing
+    display_name: Industrial Hardware / Manufacturing Equipment
+    nace_code: "C28"
+    proximity_to_ava: 1.0
+    rationale: "Syntegon (packaging/pharma manufacturing equipment) + Raymond Industrial"
+    jd_hints: [packaging equipment, industrial machinery, manufacturing equipment, process equipment, production machinery]
+    company_hints: [syntegon, raymond industrial, bosch packaging, krones, tetra pak, gea group, marel, atlas copco, sandvik, asml, vmi group]
+    related_role_families: [product_engineer_hardware, product_manager]
+
+  # ── 0.7-0.8: Close adjacents ────────────────────────────────
+  - canonical_name: smart_home_appliances
+    display_name: Smart Home / Appliances
+    nace_code: "C27"
+    proximity_to_ava: 0.8
+    rationale: "Connected-home hardware shares research, product-concept, and embedded prototyping patterns with consumer electronics."
+    jd_hints: [smart home, connected home, home appliance, smart appliance, home automation]
+    company_hints: [signify, philips lighting, miele, bosch siemens home, groupe seb, dyson, irobot, ecobee, nest, eufy, tp-link home]
+    related_role_families: [product_manager, product_researcher, product_engineer_hardware]
+
+  - canonical_name: audio_hardware
+    display_name: Audio Hardware
+    nace_code: "C26"
+    proximity_to_ava: 0.8
+    rationale: "Consumer-facing hardware; same research + product-concept + UX patterns as CE."
+    jd_hints: [audio product, speaker hardware, headphones, premium audio, audio device]
+    company_hints: [sonos, bose audio, sennheiser audio, harman kardon, jbl, marshall audio, bang olufsen, focal audio]
+    related_role_families: [product_manager, product_engineer_hardware]
+
+  - canonical_name: ar_vr_hardware
+    display_name: AR / VR / XR Hardware
+    nace_code: "C26"
+    proximity_to_ava: 0.7
+    rationale: "XR hardware is phygital by nature; cognitive psychology + UX research directly applicable."
+    jd_hints: [ar hardware, vr hardware, xr hardware, mixed reality, head-mounted display, hmd, passthrough]
+    company_hints: [meta reality labs, magic leap, varjo, lynx xr, hololens, pico xr, htc vive, valve index]
+    related_role_families: [product_researcher, product_manager, human_factors_engineer]
+
+  - canonical_name: drones_uav
+    display_name: Drones / UAV
+    nace_code: "C30"
+    proximity_to_ava: 0.7
+    rationale: "Sensor integration + robotics + consumer hardware overlap; Ava has patent work in sensor-heavy products."
+    jd_hints: [drone, uav, unmanned aerial, quadcopter, autonomous flight]
+    company_hints: [dji, skydio, autel robotics, parrot drones, delair, quantum systems, avidrone, zipline]
+    related_role_families: [product_engineer_hardware, research_engineer]
+
+  - canonical_name: sensors_semiconductors
+    display_name: Sensors / Semiconductors (product side)
+    nace_code: "C27"
+    proximity_to_ava: 0.7
+    rationale: "ToF / wireless sensor integration is verified; semiconductor product roles overlap with phygital work."
+    jd_hints: [sensor product, semiconductor product, silicon product, tof sensor, mems sensor, imager]
+    company_hints: [nxp, stmicroelectronics, infineon, bosch sensortec, sony semiconductor, texas instruments, analog devices, sensirion, ams-osram, optics11, photonfirst]
+    related_role_families: [product_manager, product_engineer_hardware]
+
+  - canonical_name: 3d_printing_fabrication
+    display_name: 3D Printing / Digital Fabrication
+    nace_code: "C28"
+    proximity_to_ava: 0.7
+    rationale: "Intersection of CAD (verified), hardware prototyping (verified), and innovation mindset."
+    jd_hints: [3d printing, additive manufacturing, digital fabrication, fdm, sla, sls, dmls]
+    company_hints: [ultimaker, formlabs, prusa, materialise, carbon3d, 3d systems, stratasys, bambu lab, bcn3d]
+    related_role_families: [product_engineer_hardware, design_technologist, innovation_engineer]
+
+  - canonical_name: gaming_hardware
+    display_name: Gaming Hardware / Peripherals
+    nace_code: "C26"
+    proximity_to_ava: 0.6
+    rationale: "Consumer hardware; user-research and product-concept overlap, though gaming-specific expertise is limited."
+    jd_hints: [gaming hardware, gaming peripheral, gaming headset, gaming device, gaming mouse, gaming keyboard]
+    company_hints: [razer, logitech g, steelseries, corsair gaming, hyperx, turtle beach, alienware hardware]
+    related_role_families: [product_manager, product_researcher]
+
+  - canonical_name: mobility_platforms
+    display_name: Mobility Platforms (navigation / MaaS)
+    nace_code: "J62"
+    proximity_to_ava: 0.7
+    rationale: "Data Viz Engineer at TomTom — direct platform experience."
+    jd_hints: [mobility platform, navigation platform, maas, mobility as a service, mapping platform, automotive software platform]
+    company_hints: [tomtom, here technologies, waymo product, mapbox, sixt share, flixbus product, bolt mobility, lyft]
+    related_role_families: [product_manager, product_researcher]
+
+  # ── 0.4-0.5: Medium ─────────────────────────────────────────
+  - canonical_name: energy_smart_grid_ev_charging
+    display_name: Energy / Smart Grid / EV Charging
+    nace_code: "D35"
+    proximity_to_ava: 0.6
+    rationale: "Adjacent to automotive through EV charging; hardware-rich subdomain."
+    jd_hints: [ev charging, smart grid, energy product, charging network, home energy management]
+    company_hints: [shell recharge, chargepoint, ionity, fastned, allego, eaton, schneider electric charging, enphase, tesla energy, enexis]
+    related_role_families: [product_manager, product_engineer_hardware]
+
+  - canonical_name: industrial_iot_automation
+    display_name: Industrial IoT / Factory Automation
+    nace_code: "C28"
+    proximity_to_ava: 0.6
+    rationale: "Overlaps Ava's Syntegon + industrial manufacturing exposure, but more software-heavy."
+    jd_hints: [industrial iot, iiot, factory automation, digital factory, mes, manufacturing execution]
+    company_hints: [siemens digital industries, rockwell automation, ge digital, ptc thingworx, plex, asml]
+    related_role_families: [technical_product_manager, product_manager]
+
+  - canonical_name: logistics_supply_chain_tech
+    display_name: Logistics / Supply Chain Tech
+    nace_code: "H52"
+    proximity_to_ava: 0.4
+    rationale: "Hardware angle (warehouse robotics, sorter) + product research on logistics UX is adjacent."
+    jd_hints: [logistics tech, warehouse automation, supply chain software, last-mile tech, parcel sorting]
+    company_hints: [scandit, picnic, flexport product, project44, sendcloud, flexport, maersk digital, dhl innovation]
+    related_role_families: [product_manager, product_researcher]
+
+  - canonical_name: retail_tech
+    display_name: Retail / POS / Connected Retail
+    nace_code: "G47"
+    proximity_to_ava: 0.4
+    rationale: "Some phygital hardware (kiosks, POS); mostly software. Fit varies by product scope."
+    jd_hints: [retail tech, point of sale, pos hardware, connected retail, digital retail]
+    company_hints: [adyen retail, mollie retail, ingenico, verifone, square, toast, lightspeed, shop apotheke]
+    related_role_families: [product_manager, product_researcher]
+
+  # ── 0.1-0.2: Far ────────────────────────────────────────────
+  - canonical_name: enterprise_saas_general
+    display_name: Pure SaaS (CRM / ERP / productivity)
+    nace_code: "J62"
+    proximity_to_ava: 0.2
+    rationale: "Pure software, no physical product; Ava's verified domain is phygital."
+    jd_hints: [saas platform, crm platform, erp, b2b saas, enterprise software platform]
+    company_hints: [salesforce, hubspot, workday, servicenow, monday.com, asana, notion, atlassian, zendesk, slack, microsoft dynamics, sap, oracle netsuite]
+    related_role_families: [product_manager]
+
+  - canonical_name: fintech_banking
+    display_name: Fintech / Banking / Payments
+    nace_code: "K64"
+    proximity_to_ava: 0.2
+    rationale: "Purely software domain; payments UX can be interesting but lacks Ava's verified hardware anchor."
+    jd_hints: [fintech, banking app, payments platform, trading platform, investment platform]
+    company_hints: [adyen, mollie, revolut, n26, bunq, ing digital, abn amro, rabobank, klarna, wise, stripe]
+    related_role_families: [product_manager]
+
+  - canonical_name: adtech_martech
+    display_name: AdTech / MarTech
+    nace_code: "M73"
+    proximity_to_ava: 0.2
+    rationale: "Software marketing-tech; far from hands-on phygital research."
+    jd_hints: [adtech, martech, marketing automation, advertising platform, campaign platform]
+    company_hints: [hubspot marketing, marketo, braze, mailchimp, salesforce marketing cloud, the trade desk, criteo]
+    related_role_families: [product_marketing_manager, growth_engineer]
+
+  - canonical_name: cloud_infra_devtools
+    display_name: Cloud Infra / Developer Tools
+    nace_code: "J62"
+    proximity_to_ava: 0.1
+    rationale: "Developer-facing software infrastructure; Ava's background is not backend/infra."
+    jd_hints: [cloud platform, developer tools, ci/cd product, infrastructure product]
+    company_hints: [aws, azure, gcp, github, gitlab, docker, hashicorp, elastic, databricks, snowflake, confluent, mongodb]
+    related_role_families: [software_engineer, devops_infra]
+
+  - canonical_name: clinical_medical_device
+    display_name: Clinical / Regulated Medical Device
+    nace_code: "C32"
+    proximity_to_ava: 0.2
+    rationale: "PRD §14 split: regulated clinical devices are 'far' — ISO 13485 / MDR domain is out-of-scope (see skills.yaml forbidden)."
+    jd_hints: [medical device, clinical device, diagnostic device, surgical device, hospital equipment]
+    company_hints: [medtronic, stryker, edwards lifesciences, boston scientific, smith nephew, zimmer biomet, philips healthcare, siemens healthineers, ge healthcare, vicentra]
+    related_role_families: [biomedical_engineer]
+
+  - canonical_name: pharma_life_sciences
+    display_name: Pharma / Life Sciences
+    nace_code: "C21"
+    proximity_to_ava: 0.1
+    rationale: "Not Ava's domain; transferable evidence minimal."
+    jd_hints: [pharmaceutical, drug discovery, clinical trial platform, life sciences]
+    company_hints: [gsk, pfizer, roche, novartis, astrazeneca, merck, sanofi, bayer pharma, janssen]
+    related_role_families: []
+
+  - canonical_name: hr_tech
+    display_name: HR Tech / People Software
+    nace_code: "N78"
+    proximity_to_ava: 0.2
+    rationale: "Pure enterprise software; people-facing but not phygital."
+    jd_hints: [hr tech, people software, recruitment platform, hris]
+    company_hints: [workday, personio, bamboohr, greenhouse, lever.co, deel.com, remote.com, rippling]
+    related_role_families: [product_manager]
+
+  # ── 0.0-0.1: Very far (explicit negative signals) ───────────
+  - canonical_name: traditional_banking_insurance
+    display_name: Traditional Banking / Insurance
+    nace_code: "K65"
+    proximity_to_ava: 0.1
+    rationale: "Core financial services; far from hardware / user-research anchor."
+    jd_hints: [retail banking core, commercial banking, life insurance, general insurance, actuarial]
+    company_hints: [ing core banking, abn amro core, achmea, aegon, nn group, allianz]
+    related_role_families: []
+
+  - canonical_name: oil_gas_heavy_industry
+    display_name: Oil & Gas / Heavy Industry
+    nace_code: "B06"
+    proximity_to_ava: 0.0
+    rationale: "PRD §14 marks as very far; no transferable evidence."
+    jd_hints: [oil and gas, upstream energy, oilfield services, petrochemical processing, offshore drilling, refining operations]
+    company_hints: [shell upstream, bp upstream, totalenergies upstream, exxonmobil, chevron, equinor, aramco]
+    related_role_families: [domain_locked_engineering]
+
+  - canonical_name: media_streaming_pure_software
+    display_name: Media / Streaming (software)
+    nace_code: "J60"
+    proximity_to_ava: 0.2
+    rationale: "Pure content-software; interesting UX but far from hardware anchor."
+    jd_hints: [streaming platform, content platform, media software, video platform]
+    company_hints: [netflix, spotify, disney plus, prime video, warner bros discovery, ziggo product]
+    related_role_families: [product_manager]
+
+  - canonical_name: management_consulting
+    display_name: Traditional Management Consulting
+    nace_code: "M70"
+    proximity_to_ava: 0.1
+    rationale: "Preferences.yaml explicitly avoids MC-style consulting (non-prototyping, PPT-led)."
+    jd_hints: [management consulting, strategy consulting firm, top-tier consulting]
+    company_hints: [mckinsey, bcg, bain, deloitte strategy, accenture strategy, roland berger, oliver wyman, pwc strategy, kpmg strategy]
+    related_role_families: [strategy_consultant]
+
+  - canonical_name: recruitment_staffing_agency
+    display_name: Recruitment / Staffing Agency
+    nace_code: "N78"
+    proximity_to_ava: 0.0
+    rationale: "Already negative_signal in skills.yaml; industry placement here for completeness."
+    jd_hints: [staffing agency, recruitment agency, interim placement]
+    company_hints: [randstad, manpower, adecco, yacht, tempo-team, hays, michael page, morpheus talent, projob]
+    related_role_families: []
+
+  - canonical_name: fashion_apparel
+    display_name: Fashion / Apparel (non-wearable-tech)
+    nace_code: "C14"
+    proximity_to_ava: 0.1
+    rationale: "PRD §14 example: automotive ↔ fashion is 'very far'. Consumer goods but no phygital/tech anchor."
+    jd_hints: [fashion product, apparel brand, clothing retail]
+    company_hints: [adidas apparel, nike apparel, inditex, h&m, zalando product, asos, tommy hilfiger]
+    related_role_families: [product_manager]
+
+# ══════════════════════════════════════════════════════════════
+# SCORER BEHAVIOUR
+# ══════════════════════════════════════════════════════════════
+scorer_defaults:
+  max_score: 10                    # PRD §15: industry_proximity weight is 10
+  unknown_industry_score: 4        # neutral-low per user decision 2026-04-20
+  proximity_curve:                 # linear interpolation: proximity_to_ava → points
+    type: linear
+    points:
+      - [0.0, 0]
+      - [0.2, 2]
+      - [0.5, 5]
+      - [0.8, 8]
+      - [1.0, 10]
+  # Classification precedence (consumed by R2-02 classifier):
+  classifier_precedence: [company_hints, jd_hints]
+  # Industry NEVER hard-rejects on its own. See design rules at top of file.
+  can_hard_reject: false

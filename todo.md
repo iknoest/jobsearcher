@@ -103,6 +103,10 @@
 - [x] Skip from email defaults to "Skipped from email digest"; user can refine with `/skip <id> <reason>`
 - [x] `TG_BOT_USERNAME` env var enables TG buttons; falls back to View-only if not set
 - [x] Uncertain card styled in grey, section-label header, shows missing info prominently
+- [x] Interactive skip flow: deeplink shows job card + InlineKeyboard with 2-3 suggested reasons (from Gap Analysis + Main Risk) + "Type my own" free-text option
+- [x] Overwrite support: re-tapping Good/Skip on any job supersedes prior verdict; confirmation shows "Overwrote: <prev>"
+- [x] Weekly feedback summary shown after every verdict ("This week: N good · M not fit")
+- [x] Verdict timestamp written to Sheet in "Verdict At" column (added dynamically if missing)
 
 ## Phase E: Learning tweaks (completed 2026-04-15)
 - [x] 1-sample nudge: ±3 pts from first verdict in any direction (immediate, no waiting)
@@ -119,11 +123,68 @@
 - [x] `/score <url|text>` — runs pre-filters first, reports which rule killed it, then LLM if passes (Phase C: tg_bot.py cmd_score)
 
 ## Phase 1g: Remaining
-- [ ] Run full keyword set (15 keywords across 3 tiers) — operational, no code change needed
-- [ ] Re-enable Indeed/Google/Glassdoor platforms (fix hanging on Windows, add timeouts)
+- [x] Run full keyword set (16 keywords across 3 tiers) — first full run 2026-04-16, 464 jobs scraped
+- [x] Re-enable Indeed/Google platforms — per-platform 90s thread timeout via concurrent.futures; Glassdoor left disabled (API errors)
 - [x] Fix Google Sheets feedback sync — switched get_all_records() → get_all_values() with manual header dedup; survives duplicate/empty header cells
 - [x] Short-circuit on LLM exhaustion — AllProvidersExhausted exception bails score loop early with partial results
 - [x] Populate industry_bonus / skill_bonus in config/prerank.yaml (automotive +15, IoT +12, robotics +12, user research +8, VOC +8, etc.)
+
+## Phase 1h: Location + Feedback fixes (completed 2026-04-16)
+- [x] Location filter (Step 2.5) — hard-reject non-NL, non-remote jobs; keeps NL (", NL" suffix), remote (is_remote=True), empty location; rejects all others; ~198 non-NL jobs blocked in first full run
+- [x] Fix verdict URL="Unknown" collision — all verdicts were keyed on literal "Unknown" causing every new verdict to supersede all previous; added _canonical_url() helper that falls back to https://www.linkedin.com/jobs/view/{job_id} when Sheet URL is bad
+- [x] Add company to record_verdict() — stored in feedback_log so /goodmatches can display it
+- [x] /goodmatches clickable links — now renders <a href="...">View job →</a> with company name
+- [x] Bot startup conflict-clear — _clear_stale_connection() calls getUpdates with timeout=1 before polling to evict stale Telegram long-poll sessions on restart
+- [x] --resend mode — load enriched cache, apply location filter, rescore top N with LLM, send email; does NOT write to Sheet (safe to run after broken runs)
+- [x] score_all_jobs force=True — bypass seen_jobs.json dedup for resend/re-score use cases
+- [x] Sheet header repair — _repair_jobs_headers() in setup_tabs() detects and fixes stale column headers (Industry column was missing, shifting Job URL to wrong column → all URLs stored as "Unknown")
+- [ ] Verify Sheet header repair works on next --manual run (Job URL should no longer be "Unknown")
+- [x] Fix TG deeplink Skip/Good for Indeed/Google jobs — `_job_id_from_url` now emits short Telegram-safe IDs (`in_<jk>`, `hx_<md5>`); `_find_job_row` strips prefix before searching Sheet
+
+## Phase H: LinkedIn geoId patch (completed 2026-04-18)
+- [x] `src/jobspy_patches.py` — monkey-patch `LinkedIn.__init__` to wrap `session.get`; inject `geoId` param when URL hits LinkedIn's search endpoint
+- [x] `LINKEDIN_GEOID_BY_COUNTRY` map — NL=102890719, DE/BE/FR/UK included for future reuse
+- [x] Imported at top of `src/scraper.py` so every scrape_jobs call benefits
+- [x] Live verified: `scrape_jobs(site_name=['linkedin'], location='Netherlands', results_wanted=50)` → 50/50 NL jobs (was ~30% NL before)
+- [x] Added 3 keywords to `config/search.yaml` exploratory tier: Consumer Insights Manager, Innovation Manager, Human Factors Engineer
+- [ ] (Future) Add NL-native boards: Nationale Vacaturebank, Werkzoeken.nl, Stepstone.nl — 300K+ extra NL listings
+- [ ] (Future) Raise `results_per_keyword` beyond 50 now that scrape yields mostly NL
+
+## Phase G: 4-block work-style redesign (completed 2026-04-17)
+- [x] `config/preferences.yaml` — Seniority target/caution, preferred_loop, avoid/prefer/open_to lists, 7-dim rubric, V2 dimension weights
+- [x] `src/matcher.py` — New SCORING_PROMPT (Dimensions/GreenFlags/RedFlags/AntiPatternRisk/SuggestedAction); preferences injection; deterministic `_compute_suggested_action()` (6 labels: Strong Apply / Apply / Review / Skip / Good role, risky org / Seniority mismatch); Head-of title regex → Seniority mismatch
+- [x] `src/sheets.py` — 9 new columns (SuggestedAction, AntiPatternRisk, 7×Dim); `_extract_from_match_result` handles both new (GreenFlags) and legacy (WhyFit) schemas
+- [x] `src/notifier.py` — New card UI: 6-color SuggestedAction pill, Risk Low/Med/High badge, compact dimensions row ("Research 5/5 · Innovation 5/5 · Alignment risk 1/5 ..."), Green/Red Flags sections; legacy rows still render WhyFit/Gaps
+- [x] `config/prerank.yaml` — Green-flag keyword bonuses (rapid prototyping +8, player-coach +10, 0 to 1 +8, small team +5, ...) + `description_penalty` section for anti-patterns (stakeholder alignment -8, waterfall -10, management consulting -8, ...)
+- [x] `src/prerank.py` — Loop for `description_penalty` anti-pattern keywords
+- [x] Tests — 56/56 passing; updated `test_scoring_prompt_formats_without_error` with new `preferences_block` key
+- [x] Smoke test — `--rerank-only` runs clean; anti-pattern penalties fire on real data (e.g. "management consulting-8" on Oliver Wyman, "stakeholder alignment-8" on ISO role)
+- [x] Backward compat — **only new jobs** get new schema; existing ~80 Sheet rows continue rendering via legacy WhyFit/Gaps path
+- [ ] V2: feedback-loop integration (skip-reason → dimension penalty mapping; score↔decision mismatch tracking)
+- [ ] Calibration rescore — verify Polaroid PM (user verdict=Good) → Apply/Strong Apply; Heliox Sr Systems Engineer (user=Skip) → Review/Skip with ProcessHeaviness high; Optics11 Engineering Manager (user=Skip) → Seniority mismatch (quota-cost; run after next `--manual` cycle)
+
+## Phase R: PRD-aligned rebuild (started 2026-04-19)
+Canonical task tracker: `TASKS.json` (single source of truth; has full acceptance criteria).
+High-level phases:
+- [x] R0 — Alignment with user on PRD interpretation, scoring weights, taxonomy depth, role scope (2026-04-19)
+- [x] R1 — Personal Fit Layer (roles.yaml / skills.yaml / industries.yaml / constraints.yaml / evidence.yaml) — COMPLETE 2026-04-22
+  - [x] R1-01 roles.yaml (2026-04-20) — 6 desired / 6 ambiguous / 8 excluded families; `output/role_classifier_dryrun.json`
+  - [x] R1-02 skills.yaml (2026-04-22) — 25 verified / 19 adjacent / 13 forbidden / 10 negative_signal (post-user-edit); `output/skills_dryrun.json`
+  - [x] R1-03 industries.yaml (2026-04-20) — 31 industries, single-column proximity, unknown=4/10; `output/industries_dryrun.json`
+  - [x] R1-04 constraints.yaml (2026-04-20) — 13 constraints (5 hard / 8 soft after seniority split); `output/constraints_dryrun.json`
+  - [x] R1-05 evidence.yaml (2026-04-22) — 22 proof points; 25/25 verified skill coverage; `output/evidence_dryrun.json`
+- [x] R2 — Classification stage (role family / industry / seniority classifiers) — DONE 2026-04-22
+  - [x] R2-01 role-family classifier (2026-04-22) — `src/classify/role_family.py` + Stage 3b wired into `main.py`; 18 unit tests; dry-run: 94.6% coverage, 17 hard-rejects, 115 rescued
+  - [x] R2-02 industry classifier (2026-04-22) — `src/classify/industry.py`; 17 unit tests; dry-run on 664 role-survivors: 12.2% anchor / 15.2% far / 61.3% unknown (→ R3 fallback 4/10); 56 company+JD disagreements captured as secondary_candidates
+  - [x] R2-03 seniority classifier (2026-04-22) — `src/classify/seniority.py`; 28 unit tests; dry-run on 681 cached: 19 hard-rejects (interns/trainees/graduate-programs only, no false positives), 59 mismatch-flags (junior/head-of/mid-level routed to Review, never dropped); 119/119 total tests passing
+- [ ] R3 — Sub-score engine (6 interpretable sub-scorers per PRD §15)
+  - [x] R3-01 role_fit (2026-04-22) — `src/score/role_fit.py` + `src/score/__init__.py`; 18 unit tests; dry-run on 645 Stage-3b survivors: mean 14.38 / median 16 / stdev 5.25; bucket bands 15-20 / 10-14 / 6-10 caps + deliverable bonus (max +5, strong +1 / weak +0.5) + anti-pattern penalty (max −3, roadmap-alignment combo rule); 137/137 total tests passing
+  - [x] R3-02 hard_skill (2026-04-22) — `src/score/hard_skill.py` + `src/score/skill_extract.py`; 21 unit tests (deterministic via `jd_skills` param); Gemini→Groq extraction chain; cache keyed by URL + sha256(normalized_jd)[:16]; forbidden_core → score=0, optional-forbidden cap -5, negative cap -3; 10-job live dry-run confirmed end-to-end + surfaced synonym-coverage gap (→ R3-02b); 158/158 total tests passing
+  - [x] R3-02b close skills.yaml synonym coverage gap (2026-04-22) — renamed Mechanical engineering fundamentals → Product development for physical products; added 2 new adjacent Low entries (Design validation tools familiarity, General spreadsheet tools); extended 5 verified entries with user-approved synonyms; tightened forbidden to depth-qualified only. Lift: avg verified/job 1.1 → 2.00 (+82%), 7/10 jobs now ≥ 2 verified hits (was 2/10). Monitor phrases (product mechanical design, engineering validation) had zero over-triggering in sample
+  - [x] R3-03 seniority_fit + industry_proximity + desirability + evidence (2026-04-22) — 4 modules in `src/score/`; 47 unit tests (15+9+16+7); dry-run on 645 Stage-3b survivors: subtotal mean 27.84 / median 28 / stdev 6.95 out of 45, range 7-43; top samples ranked correctly (Senior PM/UX/Mech Eng all 42-43/45); 205/205 total tests passing
+  - [x] R3-04 aggregate (2026-04-22) — `src/score/aggregate.py`; 19 unit tests covering all Apply/Review/Skip paths, demoters, guardrails; full-pipeline dry-run validates flow end-to-end (Trip.com Senior Product Designer = only Apply at 78/100 because it's the only job with real LLM extraction — proves the hard_skill ≤ 8 guardrail works as designed); 224/224 total tests passing
+- [ ] R4 — Sheets + Email redesign (Apply/Review/Skip, trimmed schema)
+- [ ] R5 — Code restructure to adapters/parse/filters/classify/score/recommend/storage
 
 ## Phase 3: Enhancements
 - [ ] Company enrichment (Glassdoor ratings, Google reviews, company size via web scraping)

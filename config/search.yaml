@@ -21,18 +21,21 @@ search_keywords:
     - "Growth Engineer"
     - "Research Engineer"
     - "Strategy Consultant"
+    - "Consumer Insights Manager"   # research ownership — matches A/D
+    - "Innovation Manager"          # IDEO-style / 0->1 mandate — matches F
+    - "Human Factors Engineer"      # cog psych + hardware bridge
 
 platforms:
   - linkedin
-  # - indeed     # Phase 2: hangs on Windows, needs timeout fix
-  # - google     # Phase 2: hangs on Windows, needs timeout fix
-  # - glassdoor  # Phase 2: API errors, re-enable once stable
+  - indeed     # timeout-protected: 90s per keyword, skipped if hangs
+  - google     # timeout-protected: 90s per keyword, skipped if hangs
+  # - glassdoor  # API errors — leave disabled until stable
 
 location: "Netherlands"
 country_indeed: "Netherlands"
 distance_km: 50
-results_per_keyword: 20
-hours_old: 72  # 72h for initial runs; reduce to 24h once daily cron is active
+results_per_keyword: 50
+hours_old: 168  # 7 days; reduces to 24h once daily cron is active and cache is warm
 
 # Job type filter (null = all types)
 job_type: null  # fulltime, parttime, contract, internship

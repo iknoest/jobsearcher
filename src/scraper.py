@@ -1,11 +1,16 @@
 """JobSpy wrapper — scrapes jobs from multiple platforms."""
 
+import concurrent.futures
 import time
 
 import pandas as pd
 import trafilatura
+from . import jobspy_patches  # noqa: F401 — monkey-patches LinkedIn geoId before scrape_jobs import
 from jobspy import scrape_jobs
 import yaml
+
+# Per-platform timeout (seconds). LinkedIn is fast; Indeed/Google can hang on Windows.
+_PLATFORM_TIMEOUT = 90
 
 
 def load_search_config(config_path="config/search.yaml"):
@@ -26,9 +31,41 @@ def _fetch_description_fallback(job_url):
     return None
 
 
+def _scrape_one_platform(platform, keyword, config):
+    """Scrape a single platform for one keyword. Called in a thread."""
+    return scrape_jobs(
+        site_name=[platform],
+        search_term=keyword,
+        location=config["location"],
+        country_indeed=config.get("country_indeed", "Netherlands"),
+        distance=config.get("distance_km", 50),
+        results_wanted=config.get("results_per_keyword", 25),
+        hours_old=config.get("hours_old", 24),
+        job_type=config.get("job_type"),
+        description_format="markdown",
+    )
+
+
+def _scrape_with_timeout(platform, keyword, config, timeout=_PLATFORM_TIMEOUT):
+    """Scrape one platform with a timeout. Returns empty DataFrame on hang/error."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_scrape_one_platform, platform, keyword, config)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            print(f"    TIMEOUT ({timeout}s) — skipping {platform} for '{keyword}'")
+            return pd.DataFrame()
+        except Exception as e:
+            print(f"    ERROR on {platform} for '{keyword}': {e}")
+            return pd.DataFrame()
+
+
 def scrape_all_keywords(config=None, tiers=None):
     """Scrape jobs for all configured keywords across all platforms.
     Returns a deduplicated DataFrame.
+
+    Each platform is scraped independently with a per-call timeout so a
+    hanging Indeed/Google call does not block LinkedIn results.
 
     Args:
         tiers: list of tiers to include e.g. ["primary"] for quick test runs.
@@ -48,26 +85,27 @@ def scrape_all_keywords(config=None, tiers=None):
             [(kw, tier) for kw in config["search_keywords"].get(tier, [])]
         )
 
+    platforms = config["platforms"]
+
     all_jobs = []
     for keyword, tier in all_keywords:
-        try:
-            jobs = scrape_jobs(
-                site_name=config["platforms"],
-                search_term=keyword,
-                location=config["location"],
-                country_indeed=config.get("country_indeed", "Netherlands"),
-                distance=config.get("distance_km", 50),
-                results_wanted=config.get("results_per_keyword", 25),
-                hours_old=config.get("hours_old", 24),
-                job_type=config.get("job_type"),
-                description_format="markdown",
-            )
-            jobs["search_keyword"] = keyword
-            jobs["search_tier"] = tier
-            all_jobs.append(jobs)
-            print(f"  [{tier}] '{keyword}': {len(jobs)} jobs found")
-        except Exception as e:
-            print(f"  [{tier}] '{keyword}': ERROR - {e}")
+        kw_frames = []
+        for platform in platforms:
+            df = _scrape_with_timeout(platform, keyword, config)
+            if not df.empty:
+                kw_frames.append(df)
+
+        if not kw_frames:
+            print(f"  [{tier}] '{keyword}': 0 jobs (all platforms failed/timed out)")
+            continue
+
+        jobs = pd.concat(kw_frames, ignore_index=True)
+        # Dedup within keyword across platforms
+        jobs = jobs.drop_duplicates(subset=["job_url"], keep="first")
+        jobs["search_keyword"] = keyword
+        jobs["search_tier"] = tier
+        all_jobs.append(jobs)
+        print(f"  [{tier}] '{keyword}': {len(jobs)} jobs found")
 
     if not all_jobs:
         return pd.DataFrame(), {}

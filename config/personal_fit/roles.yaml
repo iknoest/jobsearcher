@@ -1,0 +1,491 @@
+# Personal role-family taxonomy.
+# Consumed by src/classify/role_family.py (to be built in R2-01).
+# Edit freely; changes take effect on next pipeline run.
+#
+# Confidence scale: 0.0 (no evidence) → 1.0 (strong multi-signal match).
+# Classifier = title regex match + JD keyword density − rescue deductions.
+# Title alone is NEVER sufficient to hard-reject (see classifier_defaults).
+#
+# Bucket semantics:
+#   desired_families   → high confidence match → Apply tier eligible
+#   ambiguous_families → route to Review; let sub-scorers decide
+#   excluded_families  → hard-reject IF confidence ≥ reject_confidence_threshold
+#                       AND no jd_signals_rescuing present.
+#                       Otherwise → Review.
+
+# ──────────────────────────────────────────────────────────────
+# DESIRED — Ava's core target lanes
+# ──────────────────────────────────────────────────────────────
+desired_families:
+
+  product_manager:
+    display_name: "Product Manager"
+    title_patterns:
+      - "\\bproduct manager\\b"
+      - "\\bproduct owner\\b"
+      - "\\bdigital product manager\\b"
+      - "\\bsenior product manager\\b"
+      - "\\blead product manager\\b"
+    jd_signals_required:   # at least 2 of these for high confidence
+      - "roadmap"
+      - "backlog"
+      - "stakeholder"
+      - "user research"
+      - "product vision"
+      - "product strategy"
+      - "prds"
+      - "product requirements"
+      - "discovery"
+      - "outcomes"
+    jd_signals_negative:   # presence demotes this classification
+      - "pure backend"
+      - "code ownership"
+
+  product_researcher:
+    display_name: "Product / UX Researcher"
+    title_patterns:
+      - "\\bproduct researcher\\b"
+      - "\\b(ux|user) researcher\\b"
+      - "\\buser insights (manager|lead)\\b"
+      - "\\bconsumer insights (manager|lead)\\b"
+      - "\\bsenior researcher\\b"
+    jd_signals_required:
+      - "user research"
+      - "qualitative"
+      - "quantitative"
+      - "voc"
+      - "voice of customer"
+      - "interviews"
+      - "usability"
+      - "ethnography"
+      - "survey"
+      - "research ops"
+    jd_signals_negative: []
+
+  product_engineer_hardware:
+    display_name: "Product Engineer (Hardware / Phygital)"
+    title_patterns:
+      - "\\bproduct engineer\\b"
+      - "\\bhardware product engineer\\b"
+      - "\\bmechanical product engineer\\b"
+    jd_signals_required:   # must have physical/hardware context
+      - "hardware"
+      - "prototype"
+      - "mechanical"
+      - "pcb"
+      - "sensor"
+      - "physical product"
+      - "consumer electronics"
+      - "wearable"
+      - "iot device"
+      - "enclosure"
+      - "industrial design"
+      - "tolerance"
+      - "materials"
+    jd_signals_negative:
+      - "pure software"
+      - "saas platform"
+      - "cloud-native"
+
+  innovation_engineer:
+    display_name: "Innovation Engineer / Manager"
+    title_patterns:
+      - "\\binnovation (engineer|manager|lead)\\b"
+      - "\\bproduct innovation\\b"
+      - "\\binnovation consultant\\b"
+    jd_signals_required:
+      - "prototype"
+      - "proof of concept"
+      - "experiment"
+      - "0 to 1"
+      - "0->1"
+      - "new product"
+      - "exploration"
+      - "discovery"
+      - "ideation"
+      - "concept development"
+    jd_signals_negative: []
+
+  design_technologist:
+    display_name: "Design Technologist / Prototype Engineer"
+    title_patterns:
+      - "\\bdesign technologist\\b"
+      - "\\bprototype engineer\\b"
+      - "\\bcreative technologist\\b"
+      - "\\bprototyper\\b"
+    jd_signals_required:
+      - "prototyping"
+      - "rapid iteration"
+      - "sketch"
+      - "hands-on"
+      - "physical build"
+      - "fabrication"
+      - "3d print"
+    jd_signals_negative: []
+
+  human_factors_engineer:
+    display_name: "Human Factors / Ergonomics Engineer"
+    title_patterns:
+      - "\\bhuman factors engineer\\b"
+      - "\\bergonomics engineer\\b"
+      - "\\bhuman factors specialist\\b"
+    jd_signals_required:
+      - "usability"
+      - "cognitive"
+      - "hardware"
+      - "interface"
+      - "human factors"
+      - "anthropometry"
+    jd_signals_negative: []
+
+# ──────────────────────────────────────────────────────────────
+# AMBIGUOUS — route to Review; sub-scorers tie-break
+# ──────────────────────────────────────────────────────────────
+ambiguous_families:
+
+  technical_product_manager:
+    display_name: "Technical Product Manager"
+    title_patterns:
+      - "\\btechnical product manager\\b"
+      - "\\btpm\\b"
+    note: "Some are hardware/phygital fits; many are backend/infra roles."
+    signal_split:
+      favors_good_fit:
+        - "hardware"
+        - "firmware"
+        - "iot"
+        - "embedded"
+        - "consumer electronics"
+        - "sensors"
+        - "device"
+      favors_bad_fit:
+        - "backend"
+        - "devops"
+        - "infrastructure"
+        - "microservices"
+        - "kubernetes"
+        - "saas platform"
+        - "api gateway"
+
+  research_engineer:
+    display_name: "Research Engineer"
+    title_patterns:
+      - "\\bresearch engineer\\b"
+      - "\\bsenior research engineer\\b"
+    signal_split:
+      favors_good_fit:
+        - "user research"
+        - "prototype"
+        - "experimental"
+        - "product research"
+        - "hardware"
+        - "human-in-the-loop"
+      favors_bad_fit:
+        - "machine learning research"
+        - "phd required"
+        - "publications"
+        - "arxiv"
+        - "novel algorithms"
+
+  ai_product_manager:
+    display_name: "AI Product Manager"
+    title_patterns:
+      - "\\bai product manager\\b"
+      - "\\bml product manager\\b"
+    signal_split:
+      favors_good_fit:
+        - "hardware"
+        - "phygital"
+        - "embedded ai"
+        - "edge"
+        - "wearable"
+        - "consumer device"
+      favors_bad_fit:
+        - "llm ops"
+        - "data infrastructure"
+        - "pure saas"
+        - "vector database"
+        - "rag pipeline"
+
+  growth_engineer:
+    display_name: "Growth Engineer / Growth PM"
+    title_patterns:
+      - "\\bgrowth (engineer|lead|manager)\\b"
+      - "\\bgrowth product manager\\b"
+    signal_split:
+      favors_good_fit:
+        - "consumer product"
+        - "experimentation"
+        - "user research"
+        - "a/b testing with hardware"
+      favors_bad_fit:
+        - "performance marketing"
+        - "sql tracking"
+        - "martech"
+        - "seo"
+        - "paid acquisition"
+
+  strategy_consultant:
+    display_name: "Strategy Consultant / Business Strategy"
+    title_patterns:
+      - "\\bstrategy consultant\\b"
+      - "\\bbusiness strategy\\b"
+      - "\\bcorporate strategy\\b"
+    signal_split:
+      favors_good_fit:
+        - "innovation"
+        - "ideo"
+        - "design thinking"
+        - "prototype"
+        - "hands-on"
+        - "venture building"
+      favors_bad_fit:
+        - "mckinsey"
+        - "bcg"
+        - "ppt"
+        - "pitch deck"
+        - "market entry analysis"
+        - "due diligence"
+
+  product_marketing_manager:
+    display_name: "Product Marketing Manager"
+    title_patterns:
+      - "\\bproduct marketing (manager|lead|specialist)\\b"
+      - "\\b(snr|senior|sr\\.?) product marketing manager\\b"
+      - "\\bproduct marketing director\\b"
+      - "\\bmanager,\\s*product marketing\\b"
+      - "\\b(head|director) of product marketing\\b"
+    note: "Adjacent fit via positioning/competitive insight/VOC, but drifts into pure commercial marketing. Route to Review and let hard_skill + evidence + JD content decide."
+    signal_split:
+      favors_good_fit:
+        - "competitive analysis"
+        - "competitor benchmarking"
+        - "market insights"
+        - "customer insights"
+        - "positioning"
+        - "value proposition"
+        - "product strategy"
+        - "voc"
+        - "voice of customer"
+        - "product research"
+      favors_bad_fit:
+        - "demand generation"
+        - "lead generation"
+        - "campaign management"
+        - "paid media"
+        - "martech"
+        - "sales enablement"
+        - "pipeline growth"
+        - "abm"
+
+# ──────────────────────────────────────────────────────────────
+# EXCLUDED — hard-reject when confidence ≥ threshold AND no rescue
+# ──────────────────────────────────────────────────────────────
+excluded_families:
+
+  software_engineer:
+    display_name: "Software Engineer"
+    title_patterns:
+      - "\\bsoftware engineer\\b"
+      - "\\b(frontend|backend|fullstack|full-stack) (engineer|developer)\\b"
+      - "\\b(java|node|python|go|rust|c\\+\\+|ruby|scala) developer\\b"
+      - "\\bapplication developer\\b"
+      - "\\bsenior software engineer\\b"
+      - "\\bstaff software engineer\\b"
+    jd_signals_confirming:
+      - "microservices"
+      - "ci/cd"
+      - "unit testing"
+      - "code review"
+      - "api development"
+      - "feature implementation"
+      - "framework"
+      - "design patterns"
+      - "refactoring"
+    jd_signals_rescuing:   # presence pushes to Review instead of hard-reject
+      - "product owner responsibilities"
+      - "product research"
+      - "user research"
+      - "hardware"
+      - "physical product"
+      - "phygital"
+    reject_confidence_threshold: 0.7
+
+  system_engineer:
+    display_name: "System / Systems Integration Engineer"
+    title_patterns:
+      - "\\bsystem(s)? engineer\\b"
+      - "\\bsystems integration engineer\\b"
+      - "\\bsystem architect\\b"
+    jd_signals_confirming:
+      - "systems integration"
+      - "requirements management"
+      - "v-model"
+      - "test bench"
+      - "ibm doors"
+      - "iso 26262"
+      - "validation and verification"
+    jd_signals_rescuing:
+      - "product concept"
+      - "user-facing"
+      - "hardware product development"
+      - "consumer product"
+    reject_confidence_threshold: 0.7
+
+  biomedical_engineer:
+    display_name: "Biomedical / Clinical Device Engineer"
+    title_patterns:
+      - "\\bbiomedical engineer\\b"
+      - "\\bclinical engineer\\b"
+      - "\\bmedical device engineer\\b"
+      - "\\bregulatory affairs engineer\\b"
+    jd_signals_confirming:
+      - "fda"
+      - "iso 13485"
+      - "ce marking mdr"
+      - "clinical validation"
+      - "medical device regulation"
+      - "ivd"
+      - "mdr"
+      - "biocompatibility"
+    jd_signals_rescuing:
+      - "consumer health wearable"
+      - "user research"
+      - "product manager"
+      - "phygital consumer"
+    reject_confidence_threshold: 0.7
+
+  devops_infra:
+    display_name: "DevOps / Infrastructure / SRE"
+    title_patterns:
+      - "\\bdevops\\b"
+      - "\\bsite reliability\\b"
+      - "\\bsre\\b"
+      - "\\binfrastructure engineer\\b"
+      - "\\bplatform engineer\\b"
+      - "\\bcloud engineer\\b"
+    jd_signals_confirming:
+      - "kubernetes"
+      - "terraform"
+      - "aws"
+      - "azure"
+      - "ci/cd pipeline"
+      - "observability"
+      - "monitoring"
+      - "ansible"
+      - "helm"
+      - "prometheus"
+    jd_signals_rescuing: []   # rarely legitimately ambiguous
+    reject_confidence_threshold: 0.6
+
+  pure_qa:
+    display_name: "Pure QA / Test Automation Engineer"
+    title_patterns:
+      - "\\bqa engineer\\b"
+      - "\\btest engineer\\b"
+      - "\\bsdet\\b"
+      - "\\btest automation engineer\\b"
+      - "\\bquality assurance engineer\\b"
+    jd_signals_confirming:
+      - "test automation"
+      - "selenium"
+      - "cypress"
+      - "regression testing"
+      - "test case"
+      - "test plan"
+      - "junit"
+      - "pytest framework"
+    jd_signals_rescuing:
+      - "user testing"
+      - "usability research"
+      - "qualitative research"
+    reject_confidence_threshold: 0.7
+
+  process_manufacturing_engineer:
+    display_name: "Process / Manufacturing / Production Engineer"
+    title_patterns:
+      - "\\bprocess engineer\\b"
+      - "\\bmanufacturing engineer\\b"
+      - "\\bproduction engineer\\b"
+      - "\\bindustrial engineer\\b"
+      - "\\bplant engineer\\b"
+    jd_signals_confirming:
+      - "shop floor"
+      - "lean manufacturing"
+      - "six sigma"
+      - "production line"
+      - "plc"
+      - "scada"
+      - "cycle time"
+      - "oee"
+    jd_signals_rescuing:
+      - "new product introduction"
+      - "product development phase"
+      - "design for manufacturability"
+    reject_confidence_threshold: 0.7
+
+  electrical_engineer:
+    display_name: "Electrical / Electronics Engineer"
+    title_patterns:
+      - "\\belectrical engineer\\b"
+      - "\\b(senior|staff|lead) electrical engineer\\b"
+      - "\\belectronics engineer\\b"
+      - "\\bee engineer\\b"
+      - "\\belectrical r&d engineer\\b"
+      - "\\belectrical architect\\b"
+      - "\\belectrical (product|hardware) engineer\\b"
+    jd_signals_confirming:
+      - "schematic capture"
+      - "pcb layout"
+      - "pcb design"
+      - "altium"
+      - "eagle"
+      - "kicad"
+      - "analog circuit"
+      - "power electronics"
+      - "high-voltage"
+      - "fpga"
+      - "embedded c"
+      - "signal integrity"
+    jd_signals_rescuing:   # only rescue for clear product / concept / prototyping work
+      - "product concept"
+      - "physical product development"
+      - "prototype validation"
+      - "consumer product"
+      - "user research"
+      - "product engineer"
+      - "rapid prototyping"
+    reject_confidence_threshold: 0.7
+
+  domain_locked_engineering:
+    display_name: "Domain-locked engineering (catch-all)"
+    title_patterns:
+      - "\\bchemical engineer\\b"
+      - "\\bpetroleum engineer\\b"
+      - "\\bcivil engineer\\b"
+      - "\\bstructural engineer\\b"
+      - "\\brf engineer\\b"
+      - "\\bnetwork engineer\\b"
+      - "\\bsecurity engineer\\b"
+      - "\\b(aerospace|aeronautical) engineer\\b"
+      - "\\bmining engineer\\b"
+      - "\\benvironmental engineer\\b"
+    jd_signals_confirming: []   # title-dominant category
+    jd_signals_rescuing:
+      - "product design"
+      - "consumer product"
+      - "user research"
+      - "innovation lead"
+    reject_confidence_threshold: 0.7
+
+# ──────────────────────────────────────────────────────────────
+# CLASSIFIER BEHAVIOUR
+# ──────────────────────────────────────────────────────────────
+classifier_defaults:
+  # How the classifier combines signals. Consumed by src/classify/role_family.py.
+  min_title_match_weight: 0.4     # a title regex hit contributes this much
+  per_signal_weight: 0.1          # each confirming JD keyword adds this
+  rescue_deduction: 0.3           # each rescuing signal subtracts this from excluded confidence
+  ambiguous_band: [0.4, 0.7]      # below low → no classification; above high → confident
+  review_on_conflict: true        # excluded title + desired JD signals → Review (not Skip)
+  min_confidence_to_hard_reject: 0.7  # global floor; per-family threshold can be stricter

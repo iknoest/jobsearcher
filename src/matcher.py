@@ -62,6 +62,68 @@ def load_profile(config_path="config/profile.yaml"):
         return yaml.safe_load(f)
 
 
+def load_preferences(config_path="config/preferences.yaml"):
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return {}
+
+
+def _render_preferences(prefs):
+    """Compact English block for LLM prompt injection."""
+    if not prefs:
+        return "None configured."
+    lines = []
+    sen = prefs.get("seniority", {})
+    if sen.get("target_levels"):
+        lines.append(f"Seniority target: {', '.join(sen['target_levels'])}")
+    if sen.get("caution_levels"):
+        lines.append(f"Caution (treat as separate category): {', '.join(sen['caution_levels'])}")
+    if prefs.get("preferred_loop"):
+        lines.append(f"Preferred work loop: {prefs['preferred_loop']}")
+    if prefs.get("prefer"):
+        lines.append("Prefer:")
+        lines.extend(f"  - {p}" for p in prefs["prefer"])
+    if prefs.get("open_to"):
+        lines.append("Open to:")
+        lines.extend(f"  - {p}" for p in prefs["open_to"])
+    if prefs.get("avoid"):
+        lines.append("Avoid:")
+        lines.extend(f"  - {p}" for p in prefs["avoid"])
+    return "\n".join(lines)
+
+
+_HEAD_OF_REGEX = re.compile(r"\b(head of|vp of|vice president of|director of)\b", re.I)
+
+
+def _compute_suggested_action(score, risk_level, is_head_of, blocking_alert):
+    """Deterministic mapping from score + anti-pattern risk + seniority flag to action."""
+    if blocking_alert:
+        return "Skip"
+    if is_head_of:
+        return "Seniority mismatch"
+    risk_level = (risk_level or "Low").strip().capitalize()
+    if score >= 85 and risk_level == "Low":
+        return "Strong Apply"
+    if score >= 75 and risk_level in ("Low", "Medium"):
+        return "Apply"
+    if score >= 75 and risk_level == "High":
+        return "Good role, risky org"
+    if score >= 60:
+        return "Review"
+    return "Skip"
+
+
+def _suggested_to_hint(action):
+    """Collapse 6-label SuggestedAction back to 3-tier DecisionHint for digest routing."""
+    if action in ("Strong Apply", "Apply"):
+        return "Apply"
+    if action in ("Review", "Good role, risky org", "Seniority mismatch"):
+        return "Maybe"
+    return "Skip"
+
+
 def load_feedback_log(path="config/feedback_log.json"):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -92,21 +154,21 @@ Your entire response MUST be a single JSON object and NOTHING else.
 - If you violate this, the response is discarded.
 
 You are a UX-aware Job Decision Layer for a senior Product Researcher in the Netherlands.
-
-Your job is NOT to write a long analysis report.
-Your job is to transform a job posting into a decision-ready, trustable, low-cognitive-load assessment.
+Your job: transform a job posting into a decision-ready, multi-dimensional assessment driven by **work-style fit**, not just domain keywords.
 
 ## Candidate Profile
 - Ava Tse, 8+ years experience
 - Background: Mechanical Engineering (BEng, HK PolyU) + Applied Cognitive Psychology (MSc, Utrecht University)
-- Career path: R&D Engineer (robotics, sensors) -> Project Engineer (IoT, air quality) -> UX Researcher (IoT maintenance) -> Data Viz Engineer (1M+ users) -> Senior Product Researcher (automotive, EV/PHEV, design clinics, 4000+ person VOC studies)
-- Companies: BYD Europe, TomTom, Syntegon, DFO Global (smart wearables), Raymond Industrial (IoT sensors), Jetta (robotics)
-- Core strengths: Product management, technical PRDs, Agile/Jira, user research, cognitive psychology, Python/SQL/PowerBI, ML/CV, 3D CAD, sensor integration
+- Career: R&D Engineer (robotics, sensors) -> Project Engineer (IoT) -> UX Researcher -> Data Viz Engineer (1M+ users) -> Senior Product Researcher (automotive, EV/PHEV, 4000+ person VOC studies)
+- Companies: BYD Europe, TomTom, Syntegon, DFO Global, Raymond Industrial, Jetta
+- Strengths: product management, technical PRDs, Agile/Jira, user research, cognitive psychology, Python/SQL/PowerBI, ML/CV, 3D CAD, sensor integration
 - Languages: English, Chinese, Cantonese. NO Dutch, NO German, NO French
-- Location: Hoofddorp, Netherlands. No driving licence. No visa sponsorship needed.
+- Location: Hoofddorp, NL. No driving licence. No visa sponsorship needed.
 - Domain preference: **Phygital** (physical product + software/digital integration)
 - 3 utility patents in sensors and air quality
-- Interested roles: Product Researcher, Product Owner, UX Research, Product Strategy, Innovation
+
+## Work-Style Preferences (drive the Dimensions scoring)
+{preferences_block}
 
 ## Job to Evaluate
 **Title:** {title}
@@ -131,70 +193,57 @@ Your job is to transform a job posting into a decision-ready, trustable, low-cog
 
 ## CRITICAL RULES
 
-1. BLOCKERS OVERRIDE SCORE — If Dutch mandatory, onsite-only, visa not supported, or driving licence mandatory, surface as blocking alert. Do not hide under a decent score.
+1. BLOCKERS OVERRIDE SCORE — Dutch mandatory, onsite-only, visa not supported, or driving licence mandatory → surface as BlockingAlert. Do not bury under a decent score.
 
-2. DO NOT OVERSTATE FIT — If something is only loosely related, label it Partial Match, not Strong Match. Do not present assumptions as facts.
+2. DO NOT OVERSTATE FIT — Only claim a Strong signal if the JD clearly demonstrates it. Assumptions go to Partial, not Strong.
 
-3. PHYGITAL IS NOT JUST BUZZWORDS — "digital twin", "IoT", "AI", "platform", "simulation" do NOT automatically mean strong Phygital. Only strong if the job clearly involves physical equipment, hardware, sensors, industrial/automotive/robotics/consumer hardware, or software directly tied to real-world product behavior. Cloud architecture, DevOps, enterprise platforms = Weak Phygital.
+3. PHYGITAL IS NOT JUST BUZZWORDS — "digital twin", "IoT", "AI", "platform" alone do NOT equal Strong Phygital. Strong requires physical equipment, hardware, sensors, industrial/automotive/robotics/consumer hardware, or software directly tied to real-world product behavior.
 
-4. NO LLM FLATTERY — Do not use company prestige as a reason for fit. Do not say "BYD experience is a plus." Say "Has automotive domain experience relevant to hardware-software products."
+4. NO LLM FLATTERY — Do not name-drop companies ("BYD experience is a plus"). Say "Automotive domain experience relevant to hardware-software products."
 
-5. SEPARATE GAPS FROM RISKS — Risk = structural blocker. Gap = addressable skill/experience shortage. Never mix them.
-
-6. SCORE LOGIC:
-   - Phygital relevance: 0-40 (physical+digital = high; pure software = low)
-     Strong(35-40): hardware+software tightly coupled, Ava's exact domain (automotive, robotics, IoT, consumer electronics)
-     Moderate(20-34): physical product but domain mismatch (building materials, industrial machinery, logistics equipment)
-     Weak(0-19): software platform loosely tied to hardware
-   - Seniority fit: 0-20 (8+ years, senior/lead)
-     Give 20 only if the role explicitly needs senior/lead and matches scope of Ava's experience.
-     Give 12-15 if role level is ambiguous or slightly junior in scope.
-   - Domain relevance: 0-15 (product research, UX, IoT, automotive, consumer electronics)
-     Give 15 only if Ava's EXACT industry background (automotive, IoT, robotics, consumer electronics, smart devices) matches the JD.
-     Give 8-12 if role type matches (e.g. Product Researcher) but industry is unrelated to Ava's background.
-     Give 0-7 if both role type AND industry are mismatches.
-   - Research ownership: 0-10 (owns research vs. just executes)
+5. SCORE LOGIC (MatchScore 0-100, still the primary ranking signal):
+   - Phygital relevance: 0-40
+   - Seniority fit: 0-20 (8+ years; target Senior/Lead/Principal)
+   - Domain relevance: 0-15
+   - Research ownership: 0-10
    - Company fit: 0-10
-   - Language penalty: 0 to -15 (Dutch mandatory = -15)
+   - Language penalty: 0 to -15
    - Driver licence: 0 to -10
    - Pure SaaS penalty: 0 to -40
 
-7. DECISION THRESHOLDS AND SCORE DISTRIBUTION:
-   - Apply: score >= 75, role genuinely relevant, no major blockers
-   - Maybe: 60-74, good relevance but real uncertainty
-   - Skip: < 60, or fit depends on too many assumptions
+6. SCORE SPREAD — use the full range, not a flat 82 for all Apply jobs:
+   75-79 passes threshold with notable mismatch. 80-86 solid fit. 87-93 strong (exact domain). 94-100 exceptional.
 
-   SCORE SPREAD — use the full range, not a flat 82 for all Apply jobs:
-   - 75-79: Passes threshold but notable domain mismatch or missing key requirement
-   - 80-86: Solid fit — phygital product role in adjacent or matching domain
-   - 87-93: Strong fit — Ava's specific experience (automotive, IoT, VOC, sensor) directly matches JD requirements
-   - 94-100: Exceptional — ideal domain, strong phygital, clear research ownership, no risks
-   Scores clustering at 82 are wrong. Differentiate clearly within the Apply band.
+7. DIMENSIONS — score each 0-5 ONLY from JD evidence. If signal is absent, give 2-3 (neutral/unknown), not 0. Use reason field to name JD phrase that drove the score.
+   - ResearchFit: 5 = clear research owner; 3 = partial; 0 = zero research signal
+   - InnovationFit: 5 = explicit 0->1 / experimentation / prototyping mandate; 3 = one of several priorities; 0 = pure maintenance / BAU
+   - HandsOnProximity: 5 = IC or player-coach; 3 = oversees but still gets hands dirty; 0 = 100% people management
+   - StrategyFit: 5 = owns product vision / long-term strategy; 3 = contributes; 0 = pure execution
+   - AlignmentBurden (LOWER = BETTER): 5 = heavy matrix / multi-stakeholder consensus / slow decisions; 3 = normal cross-functional; 0 = autonomous small team
+   - ProcessHeaviness (LOWER = BETTER): 5 = waterfall / compliance / approval gates; 3 = standard agile; 0 = lean minimal process
+   - TeamStyleFit: 5 = small lean team, IDEO-style collaboration; 3 = standard product team; 0 = siloed corporate
 
-8. WHYFIT MUST BE EMPLOYER-FACING — Each StrongMatch/PartialMatch item must answer: "Why would THIS employer shortlist Ava over a generic candidate for THIS specific role?"
-   FORBIDDEN in StrongMatch/PartialMatch:
-   - Generic seniority: "8 years experience", "senior level", "experienced researcher"
-   - Filter pass-through: "no Dutch required", "English OK", "located in NL", "no driving licence needed", "company is in Netherlands"
-   - Anything that applies equally to every candidate who passes the pre-filters
-   REQUIRED format: [JD-specific requirement] → [Ava's exact matching experience with context]
-   Example good: "JD要求大規模用戶研究 → Ava在BYD主導4000+人VOC研究，具備同等規模的設計研究能力"
-   Example bad: "具備8年以上工作經驗" or "不需要荷蘭語，符合Ava條件"
+8. GREEN FLAGS — 2-3 items, 繁體中文, each MUST be [JD-specific requirement] → [Ava's exact matching experience with context]. Example good: "JD要求大規模用戶研究 → Ava在BYD主導4000+人VOC研究". FORBIDDEN: "8年經驗", "不需荷蘭語", "位於荷蘭", "無駕照要求", anything that applies to every candidate who passed the pre-filters.
 
-9. GAPS MUST BE REAL AND JD-GROUNDED — Only list a gap if:
-   (a) the JD explicitly states a requirement or preferred skill, AND
-   (b) Ava clearly cannot meet it based on her profile
-   NEVER list Dutch language or driving licence as a gap unless the JD explicitly requires them.
-   NEVER invent gaps to fill the 3-item limit — use fewer items or an empty array if real gaps are fewer.
-   NEVER list "no experience in X" if X is not mentioned in the JD.
-   Each gap must name: the specific skill/domain the JD requires vs what Ava is missing.
+9. RED FLAGS — 2-3 items, 繁體中文, each names a JD-grounded work-style anti-pattern or risk (e.g. "多部門對齊需求高，決策速度慢" / "純執行導向，無研究自主權" / "流程重、審批層級多"). Must be traceable to JD text. Do NOT list language/licence — those go to BlockingAlert.
 
-### REMINDER: Output ONLY the JSON object below. Start with `{{` and end with `}}`. No other text.
+10. ANTI-PATTERN RISK — derive Low/Medium/High from Dimensions:
+    - High: AlignmentBurden ≥ 4 OR ProcessHeaviness ≥ 4 OR (HandsOnProximity ≤ 1 AND role is not pure people-mgmt that Ava wants)
+    - Medium: AlignmentBurden = 3 OR ProcessHeaviness = 3 OR ambiguous work-style signals
+    - Low: AlignmentBurden ≤ 2 AND ProcessHeaviness ≤ 2 AND at least one of (ResearchFit/InnovationFit/HandsOnProximity) ≥ 4
+    Reason: 1-line 繁體中文 quoting the JD signal that drove the level.
 
+11. SUGGESTED ACTION — emit one of: "Strong Apply" / "Apply" / "Review" / "Skip" / "Good role, risky org" / "Seniority mismatch". System may override based on MatchScore + AntiPatternRisk + title regex, but your choice is the baseline.
+    Use "Seniority mismatch" when title is "Head of / VP of / Director of" — the role is too management-heavy for Ava's Senior→Lead target.
+    Use "Good role, risky org" when the role content fits but AntiPatternRisk is High.
+
+### REMINDER: Output ONLY the JSON object. Start with `{{`, end with `}}`. No other text.
 
 {{
   "CardSummary": {{
     "MatchScore": 0,
     "DecisionHint": "Apply | Maybe | Skip",
+    "SuggestedAction": "Strong Apply | Apply | Review | Skip | Good role, risky org | Seniority mismatch",
     "TopLabel": "一句話總結，繁體中文，不超過25字",
     "MainRisk": "繁體中文，不超過20字，若無風險則空字串",
     "BlockingAlert": "若有阻礙用⚠開頭，繁體中文，若無則空字串",
@@ -207,17 +256,20 @@ Your job is to transform a job posting into a decision-ready, trustable, low-cog
     "LanguageText": "English OK | Dutch Mandatory | Dutch Preferred",
     "ApplyComplexity": "Easy | Medium | Hard"
   }},
-  "WhyFit": {{
-    "StrongMatch": ["繁體中文短句，最多3條。每條必須點名JD的具體要求+Ava對應的具體經歷（公司/工具/數字）。禁止寫通用資歷（如「8年經驗」）、禁止寫篩選邏輯（如「不需荷蘭語」「位於荷蘭」「無駕照要求」）。"],
-    "PartialMatch": ["繁體中文短句，最多3條。同上規則，僅代表部分符合。"]
+  "Dimensions": {{
+    "ResearchFit":       {{"score": 0, "reason": "繁體中文，1行，引用JD關鍵詞"}},
+    "InnovationFit":     {{"score": 0, "reason": ""}},
+    "HandsOnProximity":  {{"score": 0, "reason": ""}},
+    "StrategyFit":       {{"score": 0, "reason": ""}},
+    "AlignmentBurden":   {{"score": 0, "reason": ""}},
+    "ProcessHeaviness":  {{"score": 0, "reason": ""}},
+    "TeamStyleFit":      {{"score": 0, "reason": ""}}
   }},
-  "Gaps": ["繁體中文，最多3條。僅列JD明確要求但Ava無法清楚符合的技能或領域。若JD未提及荷蘭語或駕照，禁止將其列為缺口。若無真實缺口則留空陣列。"],
-  "Risks": ["繁體中文，結構性風險，最多3條"],
-  "KeySkills": ["5-8 key skills/tools/qualifications explicitly required by the JD. English. Short labels (e.g. 'Python', 'Agile/Scrum', '5+ yrs PM', 'SolidWorks'). No soft skills or generic terms."],
-  "PhygitalAssessment": {{
-    "Level": "Strong | Moderate | Weak",
-    "Reason": "繁體中文，1-2句"
-  }},
+  "GreenFlags": ["繁體中文，最多3條，employer-facing [JD要求]→[Ava對應經歷]"],
+  "RedFlags": ["繁體中文，最多3條，JD-grounded work-style risk"],
+  "AntiPatternRisk": {{"Level": "Low | Medium | High", "Reason": "繁體中文，1行"}},
+  "KeySkills": ["5-8 key skills/tools explicitly required by JD. English. Short labels."],
+  "PhygitalAssessment": {{"Level": "Strong | Moderate | Weak", "Reason": "繁體中文，1-2句"}},
   "CompanySnapshot": {{
     "Name": "",
     "Industry": "",
@@ -226,12 +278,8 @@ Your job is to transform a job posting into a decision-ready, trustable, low-cog
     "IsAgency": false
   }},
   "ScoreBreakdown": {{
-    "PositiveDrivers": [
-      {{"label": "繁體中文", "impact": "+N"}}
-    ],
-    "NegativeDrivers": [
-      {{"label": "繁體中文", "impact": "-N"}}
-    ]
+    "PositiveDrivers": [{{"label": "繁體中文", "impact": "+N"}}],
+    "NegativeDrivers": [{{"label": "繁體中文", "impact": "-N"}}]
   }},
   "TrustNotes": {{
     "Confidence": "High | Medium | Low",
@@ -257,6 +305,8 @@ def score_job(job_row, profile=None, feedback_log=None, weight_adjustments=None)
             feedback_lines.append(f"- LEARNED ADJUSTMENT: {dim} {delta:+d} points (from user feedback patterns)")
     feedback_context = "\n".join(feedback_lines) if feedback_lines else "None."
 
+    preferences_block = _render_preferences(load_preferences())
+
     prompt = SCORING_PROMPT.format(
         title=job_row.get("title", "Unknown"),
         company=job_row.get("company", "Unknown"),
@@ -272,6 +322,7 @@ def score_job(job_row, profile=None, feedback_log=None, weight_adjustments=None)
         is_agency=job_row.get("is_agency", False),
         km_visa_mentioned=job_row.get("km_visa_mentioned", False),
         feedback_context=feedback_context,
+        preferences_block=preferences_block,
     )
 
     response = router.call_llm(prompt)
@@ -290,19 +341,32 @@ def score_job(job_row, profile=None, feedback_log=None, weight_adjustments=None)
 
     if result is not None:
         try:
-            score = result.get("CardSummary", {}).get("MatchScore", 0)
-            score = max(0, min(100, int(score)))
-            result["CardSummary"]["MatchScore"] = score
+            card = result.setdefault("CardSummary", {})
+            score = max(0, min(100, int(card.get("MatchScore", 0))))
+            card["MatchScore"] = score
 
-            if score >= 75:
-                result["CardSummary"]["DecisionHint"] = "Apply"
-            elif score >= 60:
-                result["CardSummary"]["DecisionHint"] = "Maybe"
-            else:
-                result["CardSummary"]["DecisionHint"] = "Skip"
+            # Clamp all dimension scores to 0-5 ints
+            dims = result.setdefault("Dimensions", {})
+            for dname in ("ResearchFit", "InnovationFit", "HandsOnProximity", "StrategyFit",
+                          "AlignmentBurden", "ProcessHeaviness", "TeamStyleFit"):
+                d = dims.setdefault(dname, {"score": 0, "reason": ""})
+                try:
+                    d["score"] = max(0, min(5, int(d.get("score", 0))))
+                except (ValueError, TypeError):
+                    d["score"] = 0
 
-            if result.get("CardSummary", {}).get("BlockingAlert"):
-                result["CardSummary"]["DecisionHint"] = "Skip"
+            risk = result.setdefault("AntiPatternRisk", {"Level": "Low", "Reason": ""})
+            risk["Level"] = (risk.get("Level") or "Low").strip().capitalize()
+            if risk["Level"] not in ("Low", "Medium", "High"):
+                risk["Level"] = "Low"
+
+            title_text = str(job_row.get("title", ""))
+            is_head_of = bool(_HEAD_OF_REGEX.search(title_text))
+            blocking = card.get("BlockingAlert", "")
+
+            suggested = _compute_suggested_action(score, risk["Level"], is_head_of, blocking)
+            card["SuggestedAction"] = suggested
+            card["DecisionHint"] = _suggested_to_hint(suggested)
 
             return result
         except (KeyError, ValueError, TypeError) as e:
@@ -315,13 +379,19 @@ def score_job(job_row, profile=None, feedback_log=None, weight_adjustments=None)
         "CardSummary": {
             "MatchScore": 50,
             "DecisionHint": "Maybe",
+            "SuggestedAction": "Review",
             "TopLabel": raw_preview[:200] or "LLM returned empty",
             "MainRisk": "JSON parse failed — review raw output",
             "BlockingAlert": "",
+            "RoleSummary": "",
         },
         "DecisionSignals": {"WorkMode": "Unknown", "SalaryText": "Unknown", "CommuteText": "Unknown", "LanguageText": "Unknown", "ApplyComplexity": "Unknown"},
-        "WhyFit": {"StrongMatch": [raw_preview[:150]] if raw_preview else [], "PartialMatch": []},
-        "Gaps": [], "Risks": [f"Parse error: {parse_error}"],
+        "Dimensions": {d: {"score": 0, "reason": ""} for d in
+                        ("ResearchFit", "InnovationFit", "HandsOnProximity", "StrategyFit",
+                         "AlignmentBurden", "ProcessHeaviness", "TeamStyleFit")},
+        "GreenFlags": [raw_preview[:150]] if raw_preview else [],
+        "RedFlags": [f"Parse error: {parse_error}"],
+        "AntiPatternRisk": {"Level": "Low", "Reason": "parse failed"},
         "PhygitalAssessment": {"Level": "Unknown", "Reason": ""},
         "CompanySnapshot": {"Name": "", "Industry": "", "Size": None, "KM_Status": None, "IsAgency": False},
         "ScoreBreakdown": {"PositiveDrivers": [], "NegativeDrivers": []},
@@ -331,13 +401,17 @@ def score_job(job_row, profile=None, feedback_log=None, weight_adjustments=None)
     }
 
 
-def score_all_jobs(df, profile=None, min_score=0):
-    """Score all jobs. Returns enriched DataFrame sorted by score."""
+def score_all_jobs(df, profile=None, min_score=0, force=False):
+    """Score all jobs. Returns enriched DataFrame sorted by score.
+
+    Args:
+        force: if True, bypass seen_jobs.json dedup (for --resend mode).
+    """
     if profile is None:
         profile = load_profile()
     feedback_log = load_feedback_log()
     weight_adj = apply_weight_adjustments()
-    seen_ids = load_seen_job_ids()
+    seen_ids = set() if force else load_seen_job_ids()
     new_seen = set(seen_ids)
 
     scores_data = []
@@ -366,14 +440,29 @@ def score_all_jobs(df, profile=None, min_score=0):
 
         card = result.get("CardSummary", {})
         signals = result.get("DecisionSignals", {})
+        dims = result.get("Dimensions", {}) or {}
+        risk = result.get("AntiPatternRisk", {}) or {}
 
         row_data = row.to_dict()
         row_data["match_score"] = card.get("MatchScore", 0)
         row_data["decision_hint"] = card.get("DecisionHint", "Skip")
+        row_data["suggested_action"] = card.get("SuggestedAction", "")
+        row_data["anti_pattern_risk"] = risk.get("Level", "")
         row_data["match_result"] = json.dumps(result, ensure_ascii=False)
         row_data["top_label"] = card.get("TopLabel", "")
         row_data["main_risk"] = card.get("MainRisk", "")
         row_data["blocking_alert"] = card.get("BlockingAlert", "")
+
+        for dname, colname in (
+            ("ResearchFit", "dim_research"),
+            ("InnovationFit", "dim_innovation"),
+            ("HandsOnProximity", "dim_handson"),
+            ("StrategyFit", "dim_strategy"),
+            ("AlignmentBurden", "dim_alignment_burden"),
+            ("ProcessHeaviness", "dim_process_heavy"),
+            ("TeamStyleFit", "dim_team_style"),
+        ):
+            row_data[colname] = dims.get(dname, {}).get("score", 0)
 
         scores_data.append(row_data)
 

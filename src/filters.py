@@ -196,6 +196,74 @@ def _validate_salary(min_amt, max_amt, currency="EUR", interval=""):
     return ""
 
 
+# Netherlands location identifiers — JobSpy formats Dutch locations as "City, Province, NL"
+# or just "NL". Keep anything matching these, plus remote jobs, plus empty locations.
+_NL_PATTERN = re.compile(
+    r",\s*NL$|^NL$|Netherlands|Nederland",
+    re.IGNORECASE,
+)
+_REMOTE_LOCATION_PATTERN = re.compile(
+    r"\b(remote|anywhere|worldwide|globally?)\b",
+    re.IGNORECASE,
+)
+
+
+def location_filter(df):
+    """Hard-reject jobs that are clearly outside the Netherlands and not remote.
+
+    Keeps:
+      • Jobs with a NL location   (e.g. "Amsterdam, NH, NL", "NL", "Netherlands")
+      • Fully remote jobs          (is_remote=True OR location contains 'remote')
+      • Jobs with empty/unknown location (can't reject what we don't know)
+
+    Rejects:
+      • Jobs with a non-NL, non-remote, non-empty location (e.g. "New York, NY",
+        "Singapore, Singapore", "London, England, UK")
+
+    This runs BEFORE enrichment — only uses raw scrape fields.
+    """
+    if df.empty:
+        return df, []
+
+    kept = []
+    rejected = []
+
+    for _, row in df.iterrows():
+        location = str(row.get("location", "")).strip()
+        is_remote = bool(row.get("is_remote", False))
+        title = str(row.get("title", ""))
+        company = str(row.get("company", ""))
+
+        # Empty / unknown location — can't reject
+        if not location or location.lower() in ("nan", "none", ""):
+            kept.append(row)
+            continue
+
+        # Remote job (is_remote flag or location text)
+        if is_remote or _REMOTE_LOCATION_PATTERN.search(location):
+            kept.append(row)
+            continue
+
+        # NL location
+        if _NL_PATTERN.search(location):
+            kept.append(row)
+            continue
+
+        # Everything else is non-NL, non-remote — reject
+        rejected.append({
+            "title": title[:60],
+            "company": company[:30],
+            "location": location,
+            "reason": f"Outside NL ({location})",
+            "SkipReason": "Outside NL",
+            "Stage": "Location Filter",
+        })
+
+    kept_df = pd.DataFrame(kept) if kept else pd.DataFrame(columns=df.columns)
+    print(f"Location filter: {len(df)} -> {len(kept_df)} jobs ({len(rejected)} outside NL)")
+    return kept_df, rejected
+
+
 def language_prefilter(df):
     """Hard-reject Dutch-language jobs BEFORE any other processing.
 

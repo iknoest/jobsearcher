@@ -1,0 +1,262 @@
+# Personal evidence library — one proof point per distinct achievement.
+# Consumed by src/score/evidence.py (R3-03) for evidence_strength sub-score (PRD §15.7).
+# Also reusable later for tailored resume / motivation letter generation.
+#
+# DESIGN RULES (locked 2026-04-20):
+#   - Distinct achievement granularity: one proof per *meaningful proof point*,
+#     not one per company.
+#   - Strength scale matches skills.yaml: High=1.0 / Medium=0.7 / Low=0.4
+#     applied by the scorer as a multiplier.
+#   - No period/date field in V1 — avoids invented or rough dates.
+#   - Grounded in config/profile.yaml + CLAUDE.md career summary.
+#     If a proof point is not supported by those facts, it does not belong here.
+#
+# Per-entry schema:
+#   id                     unique snake_case identifier
+#   topic                  human-readable theme (e.g. "Voice of Customer at scale")
+#   skills_anchored        list of canonical_name values from skills.yaml
+#   role_families_matched  list of entries from roles.yaml (desired + ambiguous)
+#   industries_matched     list of canonical_name values from industries.yaml
+#   claim                  1-2 sentences; factual; directly citable
+#   source_role            role and company (or certification issuer)
+#   strength               High | Medium | Low
+#   related_tools          optional — tools/software used
+#   related_methods        optional — methods/techniques applied
+#
+# REVIEW NOTE: Some roles at Syntegon / DFO Global are inferred generically
+# from experience_summary because profile.yaml does not map each company to a
+# specific role title. Please correct in review.
+
+proof_points:
+
+  # ── BYD EUROPE (Senior Product Researcher — automotive, EV/PHEV) ─
+  - id: byd_voc_4000
+    topic: "Voice of Customer at scale"
+    skills_anchored: [Voice of Customer (VOC), Qualitative research, Quantitative research, User research (general)]
+    role_families_matched: [product_researcher, product_manager]
+    industries_matched: [automotive]
+    claim: "Led a VOC study with 4,000+ participants across BYD Europe's EV and PHEV launches."
+    source_role: "Senior Product Researcher at BYD Europe"
+    strength: High
+    related_methods: [mixed-method, survey design, qualitative interviews]
+
+  - id: byd_ev_phev_product_research
+    topic: "Automotive EV/PHEV end-user product research"
+    skills_anchored: [User research (general), Cognitive psychology / human factors, Automotive domain (EV / PHEV)]
+    role_families_matched: [product_researcher, product_manager]
+    industries_matched: [automotive]
+    claim: "Drove end-user product research for EV and PHEV lines at BYD Europe, informing product-direction decisions."
+    source_role: "Senior Product Researcher at BYD Europe"
+    strength: High
+
+  - id: byd_voc_to_product_decision
+    topic: "Insight-to-decision product loop"
+    skills_anchored: [Voice of Customer (VOC), Product strategy input, Stakeholder management, Research synthesis]
+    role_families_matched: [product_researcher, product_manager]
+    industries_matched: [automotive]
+    claim: "Translated VOC insights into product-direction recommendations and roadmap input for stakeholders at BYD Europe."
+    source_role: "Senior Product Researcher at BYD Europe"
+    strength: High
+
+  - id: byd_automotive_competitive_intel
+    topic: "Competitive benchmarking in automotive"
+    skills_anchored: [Market & competitive intelligence]
+    role_families_matched: [product_researcher, product_manager, product_marketing_manager]
+    industries_matched: [automotive]
+    claim: "Conducted competitive benchmarking and market intelligence work for EV/PHEV product lines at BYD Europe."
+    source_role: "Senior Product Researcher at BYD Europe"
+    strength: Medium
+
+  # ── TOMTOM (Data Viz Engineer — mobility platform) ─
+  - id: tomtom_dataviz_1m_users
+    topic: "Production data visualization at scale"
+    skills_anchored: [Data visualization, Data analysis (Python / SQL), Business intelligence (Power BI), Data storytelling]
+    role_families_matched: [product_researcher, product_manager]
+    industries_matched: [mobility_platforms]
+    claim: "Built production-grade data-visualization dashboards serving 1M+ users at TomTom."
+    source_role: "Data Viz Engineer at TomTom"
+    strength: High
+    related_tools: [Python, SQL, Power BI]
+
+  - id: tomtom_mobility_platform_context
+    topic: "Mobility / navigation platform context"
+    skills_anchored: [Data visualization, Customer journey analytics]
+    role_families_matched: [product_researcher, product_manager]
+    industries_matched: [mobility_platforms]
+    claim: "Direct product-data experience on a global mobility / navigation platform at TomTom."
+    source_role: "Data Viz Engineer at TomTom"
+    strength: Medium
+
+  # ── DFO GLOBAL (R&D Engineer — smart wearables) ─
+  - id: dfo_wearables_rd
+    topic: "Smart wearables hardware R&D"
+    skills_anchored: [Consumer electronics / wearables domain, Sensor integration (ToF / wireless), Prototyping (hardware + software), Mechanical engineering fundamentals, Embedded prototyping (Arduino / RPi)]
+    role_families_matched: [product_engineer_hardware, research_engineer, design_technologist]
+    industries_matched: [smart_wearables, consumer_electronics]
+    claim: "R&D engineering on smart wearable consumer devices at DFO Global — hardware builds, sensor integration, prototype validation."
+    source_role: "R&D Engineer at DFO Global"
+    strength: High
+
+  # ── RAYMOND INDUSTRIAL (Project Engineer — IoT) ─
+  - id: raymond_iot_project_engineering
+    topic: "IoT project engineering"
+    skills_anchored: [IoT product integration, Sensor integration (ToF / wireless), Embedded prototyping (Arduino / RPi)]
+    role_families_matched: [product_engineer_hardware, technical_product_manager]
+    industries_matched: [iot_connected_devices, industrial_hardware_manufacturing]
+    claim: "IoT project engineering on connected-device builds at Raymond Industrial."
+    source_role: "Project Engineer at Raymond Industrial"
+    strength: Medium
+
+  # ── JETTA COMPANY (R&D Engineer — robotics) ─
+  - id: jetta_robotics_rd
+    topic: "Robotics R&D with sensor + CAD integration"
+    skills_anchored: [Robotics (applied), Sensor integration (ToF / wireless), "3D CAD (SolidWorks / Creo)", Mechanical engineering fundamentals, Prototyping (hardware + software)]
+    role_families_matched: [research_engineer, product_engineer_hardware]
+    industries_matched: [robotics, consumer_electronics]
+    claim: "R&D engineering on robotics at Jetta — sensor integration, CAD modelling, and hardware prototyping."
+    source_role: "R&D Engineer at Jetta Company"
+    strength: High
+    related_tools: [SolidWorks, Creo]
+
+  # ── SYNTEGON (UX Researcher — industrial / packaging equipment) ─
+  - id: syntegon_ux_research
+    topic: "UX research on industrial equipment operators"
+    skills_anchored: [User research (general), Qualitative research, Usability & user journey mapping, Research synthesis]
+    role_families_matched: [product_researcher]
+    industries_matched: [industrial_hardware_manufacturing]
+    claim: "UX research on industrial packaging / manufacturing equipment users at Syntegon — interviews, usability observation, insight synthesis for product teams."
+    source_role: "UX Researcher at Syntegon"
+    strength: Medium
+
+  # ── PATENTS ─
+  - id: utility_patents_sensors
+    topic: "Patent-level IP authorship in sensors and air quality"
+    skills_anchored: [Sensor integration (ToF / wireless), Patent / IP authoring]
+    role_families_matched: [research_engineer, innovation_engineer, product_engineer_hardware]
+    industries_matched: [sensors_semiconductors, iot_connected_devices]
+    claim: "Named inventor on 3 utility patents covering sensors and air-quality technology."
+    source_role: "Cross-company R&D work"
+    strength: High
+
+  # ── EDUCATION ─
+  - id: education_msc_applied_cogpsych
+    topic: "Applied cognitive psychology / human factors foundation"
+    skills_anchored: [Cognitive psychology / human factors, Usability & user journey mapping, User research (general)]
+    role_families_matched: [product_researcher, human_factors_engineer]
+    industries_matched: [consumer_electronics, ar_vr_hardware, smart_wearables, automotive]
+    claim: "MSc Applied Cognitive Psychology from Utrecht University — grounded in human factors for product-design decisions."
+    source_role: "MSc Applied Cognitive Psychology, Utrecht University"
+    strength: High
+
+  - id: education_beng_mechanical
+    topic: "Mechanical engineering + CAD foundation"
+    skills_anchored: [Mechanical engineering fundamentals, "3D CAD (SolidWorks / Creo)"]
+    role_families_matched: [product_engineer_hardware]
+    industries_matched: [automotive, consumer_electronics, industrial_hardware_manufacturing, robotics]
+    claim: "BEng Mechanical Engineering from Hong Kong Polytechnic University."
+    source_role: "BEng Mechanical Engineering, HK PolyU"
+    strength: High
+
+  # ── CERTIFICATIONS ─
+  - id: cert_powerbi_data_analyst
+    topic: "Production BI / data modelling"
+    skills_anchored: [Business intelligence (Power BI), Data analysis (Python / SQL)]
+    role_families_matched: [product_manager, product_researcher]
+    industries_matched: [consumer_electronics, mobility_platforms, automotive]
+    claim: "Microsoft Power BI Data Analyst certified; applied BI work in product roles."
+    source_role: "Microsoft certification + applied use at TomTom"
+    strength: High
+    related_tools: [Power BI, DAX]
+
+  - id: cert_google_ux_design
+    topic: "User research / usability fundamentals (UX certification)"
+    skills_anchored: [User research (general), Usability & user journey mapping, Research synthesis, Figma / Miro]
+    role_families_matched: [product_researcher]
+    industries_matched: [consumer_electronics, ar_vr_hardware]
+    claim: "Google UX Design Professional Certificate — structured fundamentals in user research + usability (not a UI/visual design credential)."
+    source_role: "Google UX Design Professional certification"
+    strength: Medium
+
+  - id: cert_cuhk_datamining_ml
+    topic: "Data-mining / ML fundamentals"
+    skills_anchored: [Machine learning / computer vision (applied), Data analysis (Python / SQL)]
+    role_families_matched: [ai_product_manager, research_engineer]
+    industries_matched: []
+    claim: "Certificate in Data Mining & Machine Learning from CUHK."
+    source_role: "CUHK certification"
+    strength: Low
+
+  # ── CROSS-CUTTING PRODUCT SKILLS ─
+  - id: mixed_method_research_track_record
+    topic: "Mixed-method user research across multiple products"
+    skills_anchored: [Qualitative research, Quantitative research, User research (general), Usability & user journey mapping, Research synthesis]
+    role_families_matched: [product_researcher, product_manager]
+    industries_matched: [automotive, consumer_electronics, smart_wearables, mobility_platforms]
+    claim: "Applied mixed-method user research (interviews, surveys, journey mapping, quantitative analytics, insight synthesis) across product roles at BYD, Syntegon, and TomTom."
+    source_role: "Cross-company product-research roles"
+    strength: High
+    related_methods: [user interviews, survey design, journey mapping, usability testing, affinity mapping, thematic analysis]
+
+  - id: feature_requirements_authorship
+    topic: "Feature requirements definition for phygital products"
+    skills_anchored: [Feature requirements definition, Product strategy input, Stakeholder management]
+    role_families_matched: [product_manager, technical_product_manager]
+    industries_matched: [automotive, consumer_electronics, iot_connected_devices]
+    claim: "Wrote feature specifications, prioritised requirements, and drove development alignment for phygital products (hardware + firmware + software integration)."
+    source_role: "Product roles across BYD / TomTom"
+    strength: High
+
+  - id: agile_delivery_practice
+    topic: "Agile / Scrum product delivery"
+    skills_anchored: [Backlog prioritization (Jira / Agile), Scrum / Kanban ceremonies]
+    role_families_matched: [product_manager, technical_product_manager]
+    industries_matched: [consumer_electronics, mobility_platforms]
+    claim: "Delivered product work on Agile/Scrum cadences with Jira-based backlog management."
+    source_role: "Product roles at BYD / DFO / TomTom"
+    strength: Medium
+    related_tools: [Jira, Confluence]
+
+  - id: mvp_prototype_development_track
+    topic: "Concept-to-prototype product development"
+    skills_anchored: [MVP / prototype development, Feature requirements definition, Prototyping (hardware + software), User research (general)]
+    role_families_matched: [product_manager, innovation_engineer, design_technologist]
+    industries_matched: [consumer_electronics, iot_connected_devices, smart_wearables, automotive]
+    claim: "End-to-end concept-to-prototype work: defined concepts, wrote feature requirements, coordinated the build, built prototypes hands-on, and validated with users — across BYD, DFO, Raymond, and Jetta."
+    source_role: "R&D Engineer / Project Engineer / Senior Product Researcher — cross-company"
+    strength: High
+
+  - id: product_positioning_gtm_input
+    topic: "Product positioning and GTM input"
+    skills_anchored: [Product positioning and GTM input, Market & competitive intelligence]
+    role_families_matched: [product_manager, product_marketing_manager]
+    industries_matched: [automotive, consumer_electronics, smart_wearables]
+    claim: "Contributed positioning, pricing, messaging, and market-segmentation inputs into product launches at BYD (EV/PHEV) and DFO (wearables) — did NOT own end-to-end commercial launch execution."
+    source_role: "Senior Product Researcher at BYD; R&D Engineer at DFO Global"
+    strength: Medium
+
+  - id: asia_europe_cross_regional_coordination
+    topic: "Asia-Europe cross-regional product / stakeholder coordination"
+    skills_anchored: [Stakeholder management, Cross-cultural communication (Chinese / English markets), Asia-Europe cross-regional collaboration]
+    role_families_matched: [product_manager, product_researcher, product_marketing_manager]
+    industries_matched: [automotive, consumer_electronics, industrial_hardware_manufacturing]
+    claim: "Coordinated cross-functional product/research conversations spanning Asia HQ and European operations across BYD, TomTom, and Syntegon."
+    source_role: "Multiple product roles; bilingual Mandarin/Cantonese + English"
+    strength: High
+
+# ══════════════════════════════════════════════════════════════
+# SCORER BEHAVIOUR
+# ══════════════════════════════════════════════════════════════
+scorer_defaults:
+  # Consumed by src/score/evidence.py (R3-03). PRD §15.7 weight is 10.
+  max_score: 10
+  points_per_match: 2.0             # each matched proof_point adds this
+  strength_multiplier:
+    High: 1.0
+    Medium: 0.7
+    Low: 0.4
+  cap_per_job: 10                   # ceiling regardless of how many proof points match
+  # Matching rules (handled by R3-03):
+  #   - A JD requirement matches a proof_point if the requirement's canonical_name
+  #     appears in proof_point.skills_anchored.
+  #   - Fallback: role_families_matched OR industries_matched alignment gives half credit.
+  #   - One proof_point counted at most once per job.

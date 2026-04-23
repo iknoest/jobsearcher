@@ -1,0 +1,95 @@
+# Work-style preferences for job matching (consumed by src/matcher.py).
+# Separate from config/profile.yaml (factual CV data).
+# Edit freely — changes take effect on next scoring run, no code change needed.
+
+# --- Seniority target ---
+seniority:
+  target_levels: [Senior, Lead, Principal]
+  caution_levels: [Head of, VP of, Director of]    # trigger "Seniority mismatch" action
+  junior_rejection_keywords: [junior, graduate, intern, entry-level, "0-2 years", "1-3 years"]
+
+# --- Preferred work loop (strong signal) ---
+preferred_loop: research -> idea -> prototype -> validation
+
+# --- Working style preferences ---
+prefer:
+  - hands-on, player-coach role
+  - small-to-mid team (<30 eng), lean decision-making
+  - research ownership (not just running studies for others)
+  - 0->1 / early-stage product work
+  - IDEO-style innovation consulting (hypothesis + prototype + validation)
+
+open_to:
+  - small team management (<8 direct reports)
+  - mature product at 1->N stage IF innovation mandate is clear
+
+# --- Anti-patterns to avoid ---
+avoid:
+  - heavy stakeholder alignment / matrix org / consensus-driven
+  - execution-only roles (implementation without research or strategy)
+  - process-heavy, compliance-driven, waterfall
+  - PPT-only strategy (no hands-on prototyping)
+  - pure sales-led culture (product plays second fiddle)
+  - traditional management consulting (McKinsey/BCG-style, not IDEO-style)
+
+# --- Domain preferences (reference; main scoring uses config/prerank.yaml) ---
+domain_preference:
+  strong: [automotive, consumer electronics, robotics, medical devices, smart wearables, IoT]
+  moderate: [mobility, smart home, industrial hardware]
+  weak: [pure SaaS, CRM, ERP, generic fintech, ad tech]
+
+# --- Dimension rubric (documentation of what 0-5 means per dimension) ---
+# Used both for LLM prompt injection AND as future weights for feedback loop (V2).
+dimensions:
+  ResearchFit:
+    direction: higher_is_better
+    description: |
+      5 = clear research owner, runs user/market/product research end-to-end
+      3 = partial research responsibility alongside other duties
+      0 = zero research signal in the JD
+  InnovationFit:
+    direction: higher_is_better
+    description: |
+      5 = explicit 0->1 / experimentation / prototyping mandate
+      3 = innovation is one of several priorities
+      0 = maintenance / BAU / optimization-only role
+  HandsOnProximity:
+    direction: higher_is_better
+    description: |
+      5 = IC or explicit player-coach (builds + leads)
+      3 = oversees but still gets hands dirty occasionally
+      0 = 100% people/process management
+  StrategyFit:
+    direction: higher_is_better
+    description: |
+      5 = owns product vision / long-term strategy
+      3 = contributes to strategy, owns a sub-area
+      0 = pure execution, no strategy influence
+  AlignmentBurden:
+    direction: lower_is_better      # shown to user as "Alignment risk"
+    description: |
+      5 = heavy matrix / multi-stakeholder consensus / slow decisions
+      3 = normal cross-functional coordination
+      0 = autonomous, small team, fast decisions
+  ProcessHeaviness:
+    direction: lower_is_better      # shown to user as "Process risk"
+    description: |
+      5 = waterfall / compliance / heavy documentation / approval gates
+      3 = standard agile with normal ceremonies
+      0 = lean, minimal process, outcome-focused
+  TeamStyleFit:
+    direction: higher_is_better
+    description: |
+      5 = small lean team, IDEO-style collaboration, cross-disciplinary
+      3 = standard product team in a mid-sized org
+      0 = siloed corporate, rigid roles, limited collaboration
+
+# --- Future: feedback-loop weights (V2 — not used in V1) ---
+dimension_weights:
+  ResearchFit: 1.0
+  InnovationFit: 1.0
+  HandsOnProximity: 1.0
+  StrategyFit: 0.8
+  AlignmentBurden: -1.2
+  ProcessHeaviness: -1.0
+  TeamStyleFit: 0.8

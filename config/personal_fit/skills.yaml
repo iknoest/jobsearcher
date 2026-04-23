@@ -1,0 +1,467 @@
+# Personal skills taxonomy.
+# Consumed by src/score/hard_skill.py (to be built in R3-02).
+#
+# Four buckets:
+#   verified       — Ava has deep, demonstrable experience (proof source required)
+#   adjacent       — transferable from verified work, not native expertise
+#   forbidden      — hard-reject IF JD requires as CORE (must-have / X years / core responsibility)
+#                    → only "negative_signal" treatment if merely optional / nice-to-have
+#   negative_signal — always a penalty (never a hard-reject), regardless of JD wording
+#
+# Per-entry schema:
+#   canonical_name        (required, string)
+#   synonyms              (list of match phrases; case-insensitive)
+#   proof_source          (for verified/adjacent — role + concrete evidence; required for verified)
+#   evidence_hint         (for forbidden/negative_signal — explain why it's off-target)
+#   evidence_strength     (High | Medium | Low; required for verified; optional for adjacent)
+#   related_role_families (optional; maps to roles.yaml entries — aids downstream scoring)
+#
+# Ground rule: verified entries MUST be grounded in Ava's actual career
+# (BYD Europe / TomTom / Syntegon / DFO Global / Raymond Industrial / Jetta +
+# BEng Mechanical HK PolyU + MSc Applied Cognitive Psychology Utrecht + 3 patents).
+# Never invent. If in doubt, move to adjacent.
+
+# ══════════════════════════════════════════════════════════════
+# VERIFIED — deep hands-on experience with concrete proof
+# ══════════════════════════════════════════════════════════════
+verified:
+
+  - canonical_name: Voice of Customer (VOC)
+    synonyms: [voc, voice of the customer, voice of consumer, customer insights research]
+    proof_source: "BYD Europe — led VOC study with 4000+ participants across EV/PHEV lines"
+    evidence_strength: High
+    related_role_families: [product_researcher, product_manager]
+
+  - canonical_name: Qualitative research
+    synonyms: [qualitative research, user interviews, ethnography, contextual inquiry, focus groups]
+    proof_source: "UX Researcher + Senior Product Researcher roles; interview-driven insight work at BYD and DFO"
+    evidence_strength: High
+    related_role_families: [product_researcher]
+
+  - canonical_name: Quantitative research
+    synonyms: [quantitative research, survey design, statistical analysis, user analytics]
+    proof_source: "BYD 4000-person VOC study (mixed-method); Power BI certification; data analysis across roles"
+    evidence_strength: High
+    related_role_families: [product_researcher, product_manager]
+
+  - canonical_name: User research (general)
+    synonyms: [user research, ux research, product research, research ops]
+    proof_source: "UX Researcher role + ongoing research across TomTom / BYD / DFO"
+    evidence_strength: High
+    related_role_families: [product_researcher, product_manager]
+
+  - canonical_name: Cognitive psychology / human factors
+    synonyms: [cognitive psychology, human factors, applied psychology, usability psychology]
+    proof_source: "MSc Applied Cognitive Psychology (Utrecht University)"
+    evidence_strength: High
+    related_role_families: [product_researcher, human_factors_engineer]
+
+  - canonical_name: Usability & user journey mapping
+    synonyms: [usability testing, user journey mapping, journey maps, experience mapping]
+    proof_source: "UX Researcher work; journey-mapping in TomTom and BYD"
+    evidence_strength: High
+    related_role_families: [product_researcher]
+
+  - canonical_name: Product strategy input
+    synonyms: [product strategy input, product strategy contribution, product direction input, strategy contribution]
+    proof_source: "Senior Product Researcher + cross-functional product work at BYD/DFO — contributed product direction, did NOT own full vision"
+    evidence_strength: High
+    related_role_families: [product_manager, product_researcher]
+
+  - canonical_name: Feature requirements definition
+    synonyms: [prd, technical prd, product requirements document, feature requirements, feature specification, technical feature specification, requirements writing, requirement prioritization, defining hardware requirements]
+    proof_source: "Product work across BYD / TomTom / DFO — feature definition, requirements writing, development alignment (not broad end-to-end PRD ownership)"
+    evidence_strength: High
+    related_role_families: [product_manager, technical_product_manager]
+
+  - canonical_name: Backlog prioritization (Jira / Agile)
+    synonyms: [backlog prioritization, jira, agile, scrum, sprint planning, kanban, feature prioritization, backlog refinement, backlog grooming, requirements refinement, solution trade-off evaluation]
+    proof_source: "Product roles with Agile/Scrum delivery"
+    evidence_strength: High
+    related_role_families: [product_manager]
+
+  - canonical_name: MVP / prototype development
+    synonyms: [mvp, minimum viable product, 0 to 1, zero to one, concept to prototype, prototype development, concept-to-prototype, rapid iteration]
+    proof_source: "Concept definition + feature writing + coordinating the build + hands-on prototype building + user testing across BYD / DFO / Raymond / Jetta"
+    evidence_strength: High
+    related_role_families: [product_manager, innovation_engineer, design_technologist]
+
+  - canonical_name: Stakeholder management
+    synonyms: [stakeholder management, stakeholder influence, stakeholder alignment, cross-functional collaboration, executive alignment, driving alignment]
+    proof_source: "Persuading stakeholders, presenting recommendations, and driving alignment across Asia HQ + EU ops at BYD/TomTom/Syntegon — NOT formal people management"
+    evidence_strength: High
+    related_role_families: [product_manager, product_researcher]
+
+  - canonical_name: Market & competitive intelligence
+    synonyms: [market intelligence, competitive intelligence, competitor analysis, competitive benchmarking, market research]
+    proof_source: "Product research roles — competitive benchmarking in automotive + wearables"
+    evidence_strength: High
+    related_role_families: [product_researcher, product_marketing_manager]
+
+  - canonical_name: Product positioning and GTM input
+    synonyms: [product positioning, positioning, pricing strategy, messaging framework, market segmentation, go-to-market input, gtm input, gtm support, launch planning input]
+    proof_source: "Positioning / pricing / messaging / market segmentation work at BYD and DFO — contributed to launches; did NOT own end-to-end commercial launch execution"
+    evidence_strength: Medium
+    related_role_families: [product_manager, product_marketing_manager]
+
+  - canonical_name: Data analysis (Python / SQL)
+    synonyms: [python, sql, pandas, numpy, data analysis, data wrangling, data cleaning, jupyter, notebooks, automation scripts]
+    proof_source: "Querying, cleaning, dashboards, notebooks, and automation scripts across TomTom + product roles — NOT data engineering / production pipelines"
+    evidence_strength: High
+    related_role_families: [product_researcher, product_manager]
+
+  - canonical_name: Business intelligence (Power BI)
+    synonyms: [power bi, powerbi, dax, bi dashboards, data modeling for bi]
+    proof_source: "Microsoft Power BI Data Analyst certification + BI work in product roles"
+    evidence_strength: High
+    related_role_families: [product_manager, product_researcher]
+
+  - canonical_name: Data visualization
+    synonyms: [data visualization, dataviz, dashboard design, information design]
+    proof_source: "Data Viz Engineer at TomTom (1M+ user dashboards)"
+    evidence_strength: High
+    related_role_families: [product_manager, product_researcher]
+
+  - canonical_name: 3D CAD (SolidWorks / Creo)
+    synonyms: [solidworks, creo, 3d cad, cad modeling, mechanical cad, cad, 3d design, 3d designs]
+    proof_source: "R&D Engineer (robotics, Jetta) + BEng Mechanical Engineering"
+    evidence_strength: High
+    related_role_families: [product_engineer_hardware, design_technologist]
+
+  - canonical_name: Sensor integration (ToF / wireless)
+    synonyms: [sensor integration, tof sensors, wireless sensors, sensor fusion, iot sensors, sensor systems]
+    proof_source: "Project Engineer (IoT) + R&D Engineer (robotics); 3 utility patents in sensors + air quality"
+    evidence_strength: High
+    related_role_families: [product_engineer_hardware, research_engineer]
+
+  - canonical_name: Prototyping (hardware + software)
+    synonyms: [prototyping, rapid prototyping, proof of concept, physical prototype, functional prototype, sensor prototype, hardware prototype, prototype validation, raspberry pi, arduino, test plan, test plans, verification testing, prototype development and validation]
+    proof_source: "Physical / sensor / prototype validation work at R&D Engineer (robotics) + IoT Project Engineer — NOT UI/visual design"
+    evidence_strength: High
+    related_role_families: [design_technologist, innovation_engineer, product_engineer_hardware]
+
+  - canonical_name: Product development for physical products
+    synonyms: [physical product development, product development for physical products, product-level mechanical development, consumer hardware development, product mechanical design]
+    proof_source: "BEng Mechanical Engineering + R&D Engineer / Project Engineer (IoT) roles — product-level development of physical products (NOT component-level, material-level, or simulation-heavy)"
+    evidence_strength: High
+    related_role_families: [product_engineer_hardware, product_manager, innovation_engineer]
+
+  - canonical_name: Figma / Miro
+    synonyms: [figma, miro, collaborative design tools, whiteboarding]
+    proof_source: "Product roles — collaboration canvases (research synthesis boards, journey maps) in Figma/Miro; NOT UI/visual design"
+    evidence_strength: Medium
+    related_role_families: [product_manager, product_researcher, design_technologist]
+
+  - canonical_name: Research synthesis
+    synonyms: [research synthesis, insight synthesis, affinity mapping, thematic analysis, synthesis workshop]
+    proof_source: "Synthesising qual + quant research into product-direction recommendations at BYD (4000+ VOC) + DFO + TomTom"
+    evidence_strength: High
+    related_role_families: [product_researcher, product_manager]
+
+  - canonical_name: Automotive domain (EV / PHEV)
+    synonyms: [automotive, electric vehicle, ev, phev, vehicle electrification, automotive product]
+    proof_source: "Senior Product Researcher at BYD Europe — EV/PHEV product research"
+    evidence_strength: High
+    related_role_families: [product_researcher, product_manager]
+
+  - canonical_name: Consumer electronics / wearables domain
+    synonyms: [consumer electronics, smart wearables, wearable device, connected device]
+    proof_source: "DFO Global (smart wearables) + Raymond Industrial + Jetta"
+    evidence_strength: High
+    related_role_families: [product_engineer_hardware, product_manager]
+
+  - canonical_name: Asia-Europe cross-regional collaboration
+    synonyms: [asia-europe collaboration, cross-regional teams, multi-region product work]
+    proof_source: "BYD Europe (Asia HQ + EU ops); TomTom (global); Syntegon (multi-region)"
+    evidence_strength: High
+    related_role_families: [product_manager]
+
+# ══════════════════════════════════════════════════════════════
+# ADJACENT — transferable from verified work (not native depth)
+# ══════════════════════════════════════════════════════════════
+adjacent:
+
+  - canonical_name: Product vision
+    synonyms: [product vision, long-term product vision, vision ownership, vision setting]
+    proof_source: "Contributed to product direction at BYD/DFO; does NOT own full vision end-to-end at executive level"
+    evidence_strength: Medium
+    related_role_families: [product_manager]
+
+  - canonical_name: Design validation tools familiarity
+    synonyms: [ansys, solidworks simulation, mold flow, fmea, design fmea, process fmea, design validation, engineering validation, fmea participation]
+    proof_source: "Used ANSYS / SolidWorks strength / mold flow in past R&D / product-engineering roles — NOT a simulation-analyst specialist; participated in FMEA but did not own validation end-to-end"
+    evidence_strength: Low
+    related_role_families: [product_engineer_hardware, research_engineer]
+
+  - canonical_name: General spreadsheet tools (Excel / Sheets)
+    synonyms: [excel, microsoft excel, google sheets, spreadsheet analysis, pivot tables]
+    proof_source: "Common workplace tools across all roles — supporting tool, NOT distinctive analytical depth (that is covered by Data analysis Python / SQL)"
+    evidence_strength: Low
+    related_role_families: [product_manager, product_researcher]
+
+  - canonical_name: Design thinking
+    synonyms: [design thinking, ideo-style, hcd, human-centered design]
+    proof_source: "Builds on cognitive psychology + UX research background"
+    evidence_strength: Medium
+    related_role_families: [product_researcher, innovation_engineer, strategy_consultant]
+
+  - canonical_name: Experimentation / A/B testing
+    synonyms: [a/b testing, ab test, experimentation, controlled experiment]
+    proof_source: "Quantitative research + BI background; not primary job function but fundamentals present"
+    evidence_strength: Medium
+    related_role_families: [product_manager, growth_engineer]
+
+  - canonical_name: Service design
+    synonyms: [service design, service blueprint]
+    proof_source: "UX research + journey mapping base"
+    evidence_strength: Low
+    related_role_families: [product_researcher]
+
+  - canonical_name: Product positioning & messaging
+    synonyms: [product positioning, positioning strategy, value proposition, messaging framework]
+    proof_source: "GTM + competitive intelligence experience"
+    evidence_strength: Medium
+    related_role_families: [product_marketing_manager, product_manager]
+
+  - canonical_name: Workshop facilitation
+    synonyms: [workshop facilitation, design sprint, ideation workshop]
+    proof_source: "Cross-functional leadership + stakeholder management work"
+    evidence_strength: Medium
+    related_role_families: [product_researcher, innovation_engineer]
+
+  - canonical_name: Customer journey analytics
+    synonyms: [journey analytics, funnel analysis, customer analytics]
+    proof_source: "Data Viz + VOC + BI toolset"
+    evidence_strength: Medium
+    related_role_families: [product_researcher, product_manager]
+
+  - canonical_name: Data storytelling
+    synonyms: [data storytelling, insight communication, narrative-driven analysis]
+    proof_source: "Data Viz Engineer at TomTom + BI work"
+    evidence_strength: Medium
+    related_role_families: [product_researcher, product_manager]
+
+  - canonical_name: Scrum / Kanban ceremonies
+    synonyms: [scrum ceremonies, kanban, sprint retrospective, stand-up]
+    proof_source: "Agile delivery in product roles"
+    evidence_strength: Medium
+    related_role_families: [product_manager]
+
+  - canonical_name: OKRs / goal setting
+    synonyms: [okrs, objectives and key results, goal setting framework]
+    proof_source: "Exposure via product leadership; not formally certified"
+    evidence_strength: Low
+    related_role_families: [product_manager]
+
+  - canonical_name: Machine learning / computer vision (applied)
+    synonyms: [machine learning, computer vision, yolo, opencv, ml models, image processing]
+    proof_source: "Certificate in Data Mining & ML (CUHK); applied CV work in robotics / sensor projects — supplementary, not primary expertise"
+    evidence_strength: Low
+    related_role_families: [ai_product_manager, research_engineer]
+
+  - canonical_name: Robotics (applied)
+    synonyms: [robotics, robot prototyping, applied robotics]
+    proof_source: "R&D Engineer at Jetta (robotics) — applied level"
+    evidence_strength: Medium
+    related_role_families: [research_engineer, product_engineer_hardware]
+
+  - canonical_name: IoT product integration
+    synonyms: [iot, internet of things, connected device product, iot platform]
+    proof_source: "Project Engineer (IoT) role"
+    evidence_strength: Medium
+    related_role_families: [product_engineer_hardware, technical_product_manager]
+
+  - canonical_name: Embedded prototyping (Arduino / RPi)
+    synonyms: [arduino, raspberry pi, microcontroller prototyping, embedded prototype]
+    proof_source: "Profile lists Raspberry Pi & Arduino — applied prototyping, not professional firmware"
+    evidence_strength: Medium
+    related_role_families: [design_technologist, product_engineer_hardware]
+
+  - canonical_name: 3D printing / fabrication
+    synonyms: [3d printing, fabrication, rapid fabrication, maker tools]
+    proof_source: "Prototyping + CAD background; adjacent through R&D work"
+    evidence_strength: Low
+    related_role_families: [design_technologist, product_engineer_hardware]
+
+  - canonical_name: Cross-cultural communication (Chinese / English markets)
+    synonyms: [cross-cultural, bilingual product collaboration, asia-pacific market]
+    proof_source: "Mandarin + Cantonese + English; Asia-Europe career"
+    evidence_strength: High
+    related_role_families: [product_manager, product_marketing_manager]
+
+  - canonical_name: Patent / IP authoring
+    synonyms: [patent writing, utility patent, ip disclosure]
+    proof_source: "3 utility patents (sensors + air quality)"
+    evidence_strength: Medium
+    related_role_families: [research_engineer, innovation_engineer]
+
+  - canonical_name: Basic statistics
+    synonyms: [statistics, statistical methods, hypothesis testing, regression]
+    proof_source: "Applied through VOC + quantitative research; not a statistician"
+    evidence_strength: Medium
+    related_role_families: [product_researcher]
+
+  - canonical_name: Presentation / narrative design
+    synonyms: [executive presentation, narrative design, keynote design, storytelling deck]
+    proof_source: "Product leadership — exec-level communication"
+    evidence_strength: Medium
+    related_role_families: [product_manager, product_marketing_manager]
+
+# ══════════════════════════════════════════════════════════════
+# FORBIDDEN — hard-reject IF core (must-have / required / X years)
+# Optional / nice-to-have mentions → treated as negative_signal instead.
+# (Threshold rule enforced by src/score/hard_skill.py in R3-02.)
+# ══════════════════════════════════════════════════════════════
+forbidden:
+
+  - canonical_name: Backend software engineering depth
+    synonyms: [backend development, microservices architecture, distributed systems, service mesh, event-driven architecture, spring boot, django rest, go services, rust services]
+    evidence_hint: "Ava's coding background is Python/SQL and ML-as-a-tool, not backend production engineering."
+    related_role_families: [software_engineer]
+
+  - canonical_name: Full-stack / frontend framework depth
+    synonyms: [react.js senior, angular senior, vue senior, next.js senior, typescript architecture, frontend architect]
+    evidence_hint: "No professional frontend framework depth. Figma/UX is design-side, not code."
+    related_role_families: [software_engineer]
+
+  - canonical_name: DevOps / infrastructure engineering
+    synonyms: [kubernetes, k8s, terraform, helm, ansible, infrastructure as code, platform engineering, sre, site reliability]
+    evidence_hint: "Not a target lane; no professional infra experience."
+    related_role_families: [devops_infra]
+
+  - canonical_name: Observability / monitoring stack ownership
+    synonyms: [prometheus ownership, grafana administration, elk stack owner, datadog administration, monitoring platform ownership]
+    evidence_hint: "Not target work. Using dashboards is fine; owning the observability stack is not."
+    related_role_families: [devops_infra]
+
+  - canonical_name: Test automation framework ownership
+    synonyms: [selenium automation, cypress automation, playwright automation, test framework owner, sdet, test automation engineering]
+    evidence_hint: "Pure QA/SDET work is out-of-scope. Usability testing is a separate skill (verified)."
+    related_role_families: [pure_qa]
+
+  - canonical_name: Clinical / medical device regulatory
+    synonyms: [iso 13485, mdr, ivdr, fda 510k, fda pma, clinical validation, biocompatibility, medical device regulation]
+    evidence_hint: "No clinical or medical device regulatory experience."
+    related_role_families: [biomedical_engineer]
+
+  - canonical_name: Power electronics / analog circuit depth
+    synonyms: [power electronics design, analog circuit design, high-voltage design, dc-dc converter design, inverter design]
+    evidence_hint: "Automotive EV/PHEV exposure is product-research side, not EE design."
+    related_role_families: [electrical_engineer]
+
+  - canonical_name: PCB design (as primary role)
+    synonyms: [pcb layout senior, altium senior, kicad senior, schematic capture primary]
+    evidence_hint: "Sensor integration at prototype level — not professional PCB design."
+    related_role_families: [electrical_engineer]
+
+  - canonical_name: RF / signal integrity engineering
+    synonyms: [rf engineering, radio frequency design, signal integrity, emc compliance engineering]
+    evidence_hint: "Out-of-scope; specialised EE sub-discipline."
+    related_role_families: [electrical_engineer]
+
+  - canonical_name: FPGA / ASIC / HDL design
+    synonyms: [fpga development, asic design, vhdl, verilog, rtl design, systemverilog]
+    evidence_hint: "Out-of-scope."
+    related_role_families: [electrical_engineer]
+
+  - canonical_name: Low-level firmware / RTOS engineering
+    synonyms: [embedded c primary, rtos, freertos, baremetal firmware, bootloader development]
+    evidence_hint: "Arduino/RPi prototyping is adjacent; production firmware engineering is not."
+    related_role_families: [software_engineer, electrical_engineer]
+
+  - canonical_name: Mechanical simulation / FEA / CFD depth
+    synonyms: [finite element analysis primary, fea analyst, cfd analyst, ansys primary, abaqus primary, fem simulation expert, finite element modeling expertise, cfd modeling, simulation engineer, advanced fea, structural simulation expertise, thermal simulation expert]
+    evidence_hint: "Depth-qualified only — bare tool mentions (ansys / solidworks simulation / mold flow / fmea) handled by adjacent 'Design validation tools familiarity' entry. This bucket catches expert/lead/primary framings."
+    related_role_families: [system_engineer]
+
+  - canonical_name: Domain-locked science engineering
+    synonyms: [chemical process engineering, petroleum engineering, structural engineering primary, civil engineering primary]
+    evidence_hint: "Not Ava's field."
+    related_role_families: [domain_locked_engineering]
+
+# ══════════════════════════════════════════════════════════════
+# NEGATIVE_SIGNAL — penalty only (never hard-reject)
+# ══════════════════════════════════════════════════════════════
+negative_signal:
+
+  - canonical_name: Dutch language requirement (nice-to-have)
+    synonyms: [dutch preferred, dutch is a plus, nederlands preferred]
+    evidence_hint: "Ava does not speak Dutch — even 'preferred' adds friction."
+    related_role_families: []
+
+  - canonical_name: German language requirement
+    synonyms: [german preferred, deutsch required, deutsch preferred]
+    evidence_hint: "Ava does not speak German."
+    related_role_families: []
+
+  - canonical_name: French language requirement
+    synonyms: [french preferred, français required, français preferred]
+    evidence_hint: "Ava does not speak French."
+    related_role_families: []
+
+  - canonical_name: Driving licence mention
+    synonyms: [driving licence, driver's license, driver licence, rijbewijs]
+    evidence_hint: "Ava has no driving licence — soft flag, NOT a hard filter per constraints.yaml."
+    related_role_families: []
+
+  - canonical_name: Heavy stakeholder consensus / matrix signal
+    synonyms: [matrix organization, consensus-driven, multiple stakeholder alignment, cross-functional alignment heavy]
+    evidence_hint: "Matches 'avoid' bucket in preferences.yaml — slow decision-making environment."
+    related_role_families: []
+
+  - canonical_name: Sales-led product culture
+    synonyms: [sales-led, sales-driven product, commercial-first product]
+    evidence_hint: "Product plays second fiddle to commercial."
+    related_role_families: []
+
+  - canonical_name: PowerPoint-only strategy
+    synonyms: [powerpoint strategy, slide-based strategy, pitch deck strategy, no prototype strategy]
+    evidence_hint: "Ava prefers hands-on strategy with prototyping loop."
+    related_role_families: [strategy_consultant]
+
+  - canonical_name: Traditional management consulting
+    synonyms: [mckinsey-style, bcg-style, bain-style, top-tier consulting]
+    evidence_hint: "IDEO-style innovation consulting is fine; traditional MC is not."
+    related_role_families: [strategy_consultant]
+
+  - canonical_name: Deep finance / banking domain
+    synonyms: [investment banking domain, trading systems, derivatives, capital markets core]
+    evidence_hint: "Not Ava's domain; minimal transferable evidence."
+    related_role_families: []
+
+  - canonical_name: Recruitment / staffing agency posting
+    synonyms: [staffing agency, recruitment firm, randstad, manpower, adecco, tempo-team, hays, yacht]
+    evidence_hint: "Agency postings already flagged upstream; keep as score-level penalty too."
+    related_role_families: []
+
+# ══════════════════════════════════════════════════════════════
+# SCORER BEHAVIOUR
+# ══════════════════════════════════════════════════════════════
+scorer_defaults:
+  # Consumed by src/score/hard_skill.py (R3-02).
+  verified_match_weight: 1.0          # full credit
+  adjacent_match_weight: 0.5          # half credit
+  forbidden_core_penalty: "reject"    # if JD marks forbidden skill as core → eligibility=0
+  forbidden_optional_penalty: -5      # if forbidden skill is nice-to-have → points only
+  negative_signal_penalty: -3         # each negative_signal JD match
+  core_indicators:                    # JD phrases that signal "this is a core requirement"
+    - "must have"
+    - "must-have"
+    - "required"
+    - "requirements:"
+    - "you have"
+    - "you bring"
+    - "X+ years"
+    - "at least N years"
+    - "strong experience in"
+    - "proven experience"
+    - "deep experience"
+  optional_indicators:                # JD phrases that signal "nice to have"
+    - "nice to have"
+    - "bonus"
+    - "plus"
+    - "a plus"
+    - "preferred"
+    - "welcome"
+    - "familiarity with"
+    - "exposure to"

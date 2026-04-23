@@ -60,6 +60,11 @@ def _score_one(row, config):
             score += weight
             reasons.append(f"skill:{kw}{weight:+d}")
 
+    for kw, weight in (config.get("description_penalty") or {}).items():
+        if kw.lower() in description:
+            score += weight
+            reasons.append(f"anti:{kw}{weight:+d}")
+
     return score, ", ".join(reasons) if reasons else "no signals"
 
 
