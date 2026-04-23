@@ -401,6 +401,10 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         print("All jobs already scored or deduped. Exiting.")
         return
 
+    # Capture post-dedup count + distinct role groups for digest header
+    total_new = len(jobs)
+    role_groups = int(jobs["role_family"].nunique()) if "role_family" in jobs.columns else 0
+
     # Step 4.5: Pre-rank — cheap, rule-based scoring before the LLM
     print("\n[4.5/8] Applying pre-rank (rule-based, no LLM)...")
     t0 = time.time()
@@ -580,6 +584,12 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
             pending_feedback=pending,
             feedback_summary=summary,
             keyword_stats=keyword_stats,
+            total_new=total_new,
+            role_groups=role_groups,
+            hours_window=24,
+            llm_evaluated=int((jobs["scored_by_llm"] == True).sum()) if "scored_by_llm" in jobs.columns else 0,  # noqa: E712
+            llm_skipped_by_gates=int(skip_mask.sum()) + int(len(dropped_by_cap)),
+            sub_counters=sub_counters,
         )
         output_path = send_email(
             df=jobs,

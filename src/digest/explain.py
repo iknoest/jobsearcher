@@ -1,16 +1,28 @@
-"""Deterministic per-card explanation generator (R4-02).
+"""Deterministic per-card explanation generator (R4-02, refined 2026-04-23).
 
 Reads a row dict containing R3-05 score + audit columns and returns
 human-readable text for:
-    - why_apply   : "✅ Why Apply" bullets (for Apply tier)
-    - watch_outs  : "⚠ Watch-outs" bullets (for Apply tier)
-    - holding_back: "What's holding this back" bullets (for Review tier)
-    - still_worth : "Still worth a look because..." bullets (for Review tier)
-    - skip_reason : 1-line reason (for Skip tier)
+    one_liner     : "Product Manager role in Robotics, focused on
+                     prototyping, user research"
+    matched_skills: concrete verified canonical-skill names from hard_skill
+    gap_skills    : forbidden_core + forbidden_optional hits
+    adjacent_familiar: hard_skill.adjacent_matches canonical names
+    evidence_anchors : evidence.signals.matched_proofs topics
+    why_fits      : 2-3 bullets — why this role may fit (Apply + Review)
+    watch_outs    : 2-3 bullets — risks / caveats (Apply)
+    holding_back  : 2-3 bullets — why it landed in Review (Review)
+    still_worth   : 2-3 bullets — why Review is still worth a look
+    skip_reason   : plain-language 1-line reason (Skip)
+    subscore_bars : ordered list for renderer
 
-NO LLM. All text is mechanical from the sub-score + aggregate output.
-User rule 2026-04-22: digest explanations must be deterministic so the
-user can trust the surface without second-guessing an LLM narrative.
+NO LLM is used anywhere in this module. All content is derived from
+sub-score + aggregate signals so the user can audit any explanation
+against raw scorer output without trusting a generated paragraph.
+
+User rule 2026-04-23: digest copy must answer "what this job is / why
+it may fit / what holds it back" within 3 seconds per card. Score
+numbers alone are not enough — concrete skill / evidence / gap tags
+are required on every card.
 """
 
 from __future__ import annotations
@@ -18,7 +30,7 @@ from __future__ import annotations
 from typing import Any
 
 
-# Sub-score maxima (mirror src/score/aggregate.py) for ratio math.
+# Sub-score maxima (mirror src/score/aggregate.py).
 _SUBSCORES = [
     ("role_fit", "score_role_fit", "Role fit", 25),
     ("hard_skill", "score_hard_skill", "Hard skills", 30),
@@ -32,8 +44,9 @@ _STRONG_RATIO = 0.70
 _WEAK_RATIO = 0.40
 
 
+# ── Sub-score helpers ────────────────────────────────────────────────
+
 def _sub(row: dict, col: str, max_val: int) -> tuple[int, float]:
-    """Return (score, ratio) for a sub-score col; defaults to (0, 0.0) if absent."""
     raw = row.get(col, 0)
     try:
         score = int(raw) if raw is not None else 0
@@ -44,7 +57,6 @@ def _sub(row: dict, col: str, max_val: int) -> tuple[int, float]:
 
 
 def _strong_subscores(row: dict) -> list[tuple[str, int, int]]:
-    """Sub-scores at ≥70% of max, sorted high→low."""
     out = []
     for _, col, label, max_val in _SUBSCORES:
         score, ratio = _sub(row, col, max_val)
@@ -55,7 +67,6 @@ def _strong_subscores(row: dict) -> list[tuple[str, int, int]]:
 
 
 def _weak_subscores(row: dict) -> list[tuple[str, int, int]]:
-    """Sub-scores at ≤40% of max, sorted low→high."""
     out = []
     for _, col, label, max_val in _SUBSCORES:
         score, ratio = _sub(row, col, max_val)
@@ -66,7 +77,6 @@ def _weak_subscores(row: dict) -> list[tuple[str, int, int]]:
 
 
 def _split_semi(val: Any) -> list[str]:
-    """Split a semicolon-joined audit string into clean parts; drop blanks."""
     if not val:
         return []
     if isinstance(val, list):
@@ -74,127 +84,267 @@ def _split_semi(val: Any) -> list[str]:
     return [p.strip() for p in str(val).split(";") if p.strip()]
 
 
-# ── Public API ────────────────────────────────────────────────────────
+def _signal(row: dict, key: str) -> dict:
+    raw = row.get(key)
+    return raw if isinstance(raw, dict) else {}
 
-def explain_row(row: dict) -> dict:
-    """Return all explanation strings for this row, keyed by recommendation context.
 
-    The renderer picks the fields it needs:
-        Apply tier  → why_apply + watch_outs
-        Review tier → holding_back + still_worth
-        Skip tier   → skip_reason
+def _canonical_names(matches: list, cap: int = 3) -> list[str]:
+    """Extract up to `cap` canonical_name strings from a list of match dicts."""
+    names = []
+    for m in matches or []:
+        if isinstance(m, dict):
+            name = m.get("canonical_name") or m.get("name") or ""
+        else:
+            name = str(m or "")
+        name = name.strip()
+        if name and name not in names:
+            names.append(name)
+        if len(names) >= cap:
+            break
+    return names
+
+
+# ── Concrete signal extractors (for the "tags" surface) ───────────────
+
+def _matched_skills(row: dict, cap: int = 3) -> list[str]:
+    """Verified canonical skills from hard_skill.signals.verified_matches."""
+    sig = _signal(row, "_score_raw_hard_skill_signals")
+    return _canonical_names(sig.get("verified_matches", []), cap=cap)
+
+
+def _gap_skills(row: dict, cap: int = 3) -> list[str]:
+    """Forbidden-core + forbidden-optional skills present in JD."""
+    sig = _signal(row, "_score_raw_hard_skill_signals")
+    core = _canonical_names(sig.get("forbidden_core_hits", []), cap=cap)
+    optional = _canonical_names(sig.get("forbidden_optional_hits", []), cap=cap)
+    # Core hits take priority in display
+    combined = core + [o for o in optional if o not in core]
+    return combined[:cap]
+
+
+def _adjacent_familiar(row: dict, cap: int = 3) -> list[str]:
+    """Adjacent (Low strength) skills — 'only adjacent familiarity with ...'."""
+    sig = _signal(row, "_score_raw_hard_skill_signals")
+    return _canonical_names(sig.get("adjacent_matches", []), cap=cap)
+
+
+def _evidence_anchors(row: dict, cap: int = 3) -> list[str]:
+    """Proof-point topics from evidence.yaml that matched this job."""
+    sig = _signal(row, "_score_raw_evidence_signals")
+    topics = []
+    for p in sig.get("matched_proofs", []) or []:
+        if isinstance(p, dict):
+            t = str(p.get("topic") or p.get("id") or "").strip()
+            if t and t not in topics:
+                topics.append(t)
+        if len(topics) >= cap:
+            break
+    return topics
+
+
+def _deliverables_in_jd(row: dict, cap: int = 3) -> list[str]:
+    """Strong deliverable phrases the role_fit scorer matched in the JD."""
+    sig = _signal(row, "_score_raw_role_fit_signals")
+    strong = [str(x).strip() for x in (sig.get("deliverable_hits") or []) if str(x).strip()]
+    return strong[:cap]
+
+
+# ── One-liner (what this job IS) ──────────────────────────────────────
+
+_ROLE_FAMILY_SHORT = {
+    "product_manager": "Product",
+    "product_researcher": "Product / UX research",
+    "product_engineer_hardware": "Product engineering (hardware)",
+    "innovation_engineer": "Innovation",
+    "design_technologist": "Design / prototype",
+    "human_factors_engineer": "Human factors",
+    "technical_product_manager": "Technical product",
+    "research_engineer": "Research engineering",
+    "ai_product_manager": "AI product",
+    "growth_engineer": "Growth",
+    "strategy_consultant": "Strategy / consulting",
+    "product_marketing_manager": "Product marketing",
+    "software_engineer": "Software engineering",
+    "system_engineer": "Systems engineering",
+    "biomedical_engineer": "Biomedical device engineering",
+    "devops_infra": "DevOps / infra",
+    "pure_qa": "QA / test",
+    "process_manufacturing_engineer": "Process / manufacturing",
+    "electrical_engineer": "Electrical / electronics",
+    "domain_locked_engineering": "Domain-locked engineering",
+}
+
+
+def _role_label(row: dict) -> str:
+    """Short phrase describing the role — family-aware, falls back to title."""
+    fam = str(row.get("role_family", "") or "").strip()
+    short = _ROLE_FAMILY_SHORT.get(fam)
+    if short:
+        return f"{short} role"
+    title = str(row.get("title", "") or "").strip()
+    if title:
+        # "Senior Product Manager" → "Product role"; grab the last 1-2 meaningful tokens
+        toks = [t for t in title.split() if t.lower() not in {"senior", "lead", "staff", "principal", "junior"}]
+        if toks:
+            return f"{toks[-1]} role"
+    return "Role"
+
+
+def _industry_label(row: dict) -> str:
+    display = str(row.get("industry_display", "") or "").strip()
+    if display:
+        return display
+    raw = str(row.get("industry", "") or "").strip().replace("_", " ")
+    if raw and raw.lower() != "unknown":
+        return raw
+    return "unspecified industry"
+
+
+def _focus_label(row: dict) -> str:
+    """What the role is ACTUALLY about — from concrete signals, not labels.
+
+    Priority:
+      1. 2 verified hard skills (most grounded)
+      2. Otherwise strong deliverables matched in JD
+      3. Otherwise "role-specific focus"
     """
-    rec = str(row.get("recommendation", "") or "").strip() or "Skip"
-    return {
-        "recommendation": rec,
-        "why_apply": _why_apply(row),
-        "watch_outs": _watch_outs(row),
-        "holding_back": _holding_back(row),
-        "still_worth": _still_worth(row),
-        "skip_reason": _skip_reason(row),
-        "subscore_bars": _subscore_bars(row),
-    }
+    skills = _matched_skills(row, cap=2)
+    if skills:
+        return ", ".join(s.lower() for s in skills)
+    delivers = _deliverables_in_jd(row, cap=2)
+    if delivers:
+        return ", ".join(d.lower() for d in delivers)
+    return "role-specific focus"
 
 
-# ── Apply tier ────────────────────────────────────────────────────────
+def _one_liner(row: dict) -> str:
+    """Return the "[Role] in [industry], focused on [main work]" string."""
+    return f"{_role_label(row)} in {_industry_label(row)}, focused on {_focus_label(row)}"
 
-def _why_apply(row: dict) -> list[str]:
-    """2-3 bullets describing the strongest positive signals.
 
-    Prefers aggregate-surfaced top_reasons; falls back to strong sub-scores
-    when top_reasons is empty.
+# ── Bullet builders ───────────────────────────────────────────────────
+
+def _why_fits(row: dict) -> list[str]:
+    """Why this role may fit — concrete, not just score numbers.
+
+    Order:
+      1. matched skills line
+      2. evidence anchors line
+      3. aggregate top_reasons (if still under 3 bullets)
     """
-    bullets = _split_semi(row.get("top_reasons"))
-    # Surface concrete skill matches when available
-    hs_skills = (row.get("_score_raw_hard_skill_signals") or {})
-    verified = hs_skills.get("verified_matches", []) if isinstance(hs_skills, dict) else []
-    if verified:
-        names = [m.get("canonical_name", "") for m in verified[:3] if m.get("canonical_name")]
-        if names:
-            bullets.append(f"Skills matched: {', '.join(names)}")
+    bullets = []
+    skills = _matched_skills(row, cap=3)
+    if skills:
+        bullets.append("Strong fit: " + ", ".join(skills))
+    anchors = _evidence_anchors(row, cap=3)
+    if anchors:
+        bullets.append("Evidence anchor: " + ", ".join(anchors))
+    for r in _split_semi(row.get("top_reasons")):
+        if len(bullets) >= 3:
+            break
+        if not any(_same_line(r, b) for b in bullets):
+            bullets.append(r)
     if not bullets:
-        for label, score, max_val in _strong_subscores(row)[:3]:
+        # Last-resort fallback — always say SOMETHING concrete.
+        for label, score, max_val in _strong_subscores(row)[:2]:
             bullets.append(f"{label} strong ({score}/{max_val})")
     return _dedupe(bullets)[:3]
 
 
 def _watch_outs(row: dict) -> list[str]:
-    """2-3 bullets flagging weak sub-scores, review flags, and optional-forbidden hits."""
+    """Risks / caveats for an Apply-tier card.
+
+    Order:
+      1. concrete gap skills (forbidden core/optional)
+      2. adjacent-only familiarity note (Low-strength hits)
+      3. aggregate top_risks / review_flags
+      4. weak sub-score fallback
+    """
     bullets = []
-    # Aggregate-surfaced risks first
-    risks = _split_semi(row.get("top_risks"))
-    bullets.extend(risks)
-    # Review flags from aggregate (seniority mismatch, role_rescued, optional-forbidden)
-    flags = _split_semi(row.get("review_flags"))
-    bullets.extend(flags)
-    # Finally, any weak sub-score not already mentioned
-    for label, score, max_val in _weak_subscores(row)[:2]:
-        bullets.append(f"Low {label.lower()} ({score}/{max_val})")
+    gaps = _gap_skills(row, cap=3)
+    if gaps:
+        bullets.append("Gap: " + ", ".join(gaps))
+    adj = _adjacent_familiar(row, cap=2)
+    if adj:
+        bullets.append("Only adjacent familiarity with " + ", ".join(adj))
+    for r in _split_semi(row.get("top_risks")) + _split_semi(row.get("review_flags")):
+        if len(bullets) >= 3:
+            break
+        if not any(_same_line(r, b) for b in bullets):
+            bullets.append(r)
+    if len(bullets) < 2:
+        for label, score, max_val in _weak_subscores(row)[:2]:
+            bullets.append(f"Weaker on {label.lower()} ({score}/{max_val})")
     return _dedupe(bullets)[:3]
 
 
-# ── Review tier ───────────────────────────────────────────────────────
-
 def _holding_back(row: dict) -> list[str]:
-    """Main reasons the score landed in Review band, not Apply.
+    """Why this Review-tier role didn't make Apply.
 
-    Priority: explicit review_flags from aggregate, then weakest 2 sub-scores.
+    Same shape as watch_outs but the review_flags come first because
+    they are the actual demoters in the aggregate.
     """
     bullets = _split_semi(row.get("review_flags"))
+    gaps = _gap_skills(row, cap=2)
+    if gaps:
+        bullets.append("Gap: " + ", ".join(gaps))
     if not bullets:
         bullets = _split_semi(row.get("top_risks"))
     for label, score, max_val in _weak_subscores(row)[:2]:
-        note = f"Weak {label.lower()} ({score}/{max_val})"
-        if note not in bullets:
+        note = f"Weaker on {label.lower()} ({score}/{max_val})"
+        if not any(_same_line(note, b) for b in bullets):
             bullets.append(note)
     return _dedupe(bullets)[:3]
 
 
 def _still_worth(row: dict) -> list[str]:
-    """Why a Review-tier role is still worth a look — strongest sub-scores."""
-    bullets = _split_semi(row.get("top_reasons"))
-    if not bullets:
-        for label, score, max_val in _strong_subscores(row)[:2]:
-            bullets.append(f"{label} strong ({score}/{max_val})")
-    # Surface a single verified skill if present and not already in top_reasons
-    hs_skills = (row.get("_score_raw_hard_skill_signals") or {})
-    verified = hs_skills.get("verified_matches", []) if isinstance(hs_skills, dict) else []
-    if verified:
-        names = [m.get("canonical_name", "") for m in verified[:2] if m.get("canonical_name")]
-        if names:
-            skill_line = f"Verified skills: {', '.join(names)}"
-            if skill_line not in bullets:
-                bullets.append(skill_line)
+    """Why a Review-tier card is still worth a look."""
+    bullets = []
+    skills = _matched_skills(row, cap=3)
+    if skills:
+        bullets.append("Matched skills: " + ", ".join(skills))
+    anchors = _evidence_anchors(row, cap=2)
+    if anchors:
+        bullets.append("Evidence anchor: " + ", ".join(anchors))
+    for r in _split_semi(row.get("top_reasons")):
+        if len(bullets) >= 3:
+            break
+        if not any(_same_line(r, b) for b in bullets):
+            bullets.append(r)
     return _dedupe(bullets)[:3]
 
 
-# ── Skip tier ─────────────────────────────────────────────────────────
-
 def _skip_reason(row: dict) -> str:
-    """One-line reason for Skip rows; fed into the aggregated skip section."""
-    # Prefer blockers when present (hard gates)
+    """Plain-language one-line reason for Skip rows.
+
+    User rule 2026-04-23: avoid internal phrasing like "below Review floor".
+    """
     blockers = _split_semi(row.get("blockers"))
     if blockers:
-        return blockers[0]
-    # Drop-reason from pipeline audit (e.g. missing_jd_body)
-    drop_reason = str(row.get("drop_reason", "") or "").strip()
-    if drop_reason:
-        return drop_reason
-    # Score-band Skip
+        b = blockers[0]
+        # soften forbidden_core_skill label
+        if b.startswith("forbidden_core_skill:"):
+            return "Required skill outside Ava's fit: " + b.split(":", 1)[1].strip()
+        if b.startswith("role_hard_reject:"):
+            return "Role family is outside Ava's fit: " + b.split(":", 1)[1].strip()
+        if b.startswith("seniority_hard_reject:"):
+            return "Early-career listing: " + b.split(":", 1)[1].strip()
+        return b
+    drop = str(row.get("drop_reason", "") or "").strip()
+    if drop:
+        if drop == "missing_jd_body":
+            return "Couldn't read a usable job description"
+        return drop
     final = int(row.get("final_score", 0) or 0)
     if final > 0:
-        return f"Score {final}/100 below Review floor"
+        return f"Score {final}/100 — just below the Review threshold"
     return "Skipped"
 
 
-# ── Sub-score bars (data for render.py to draw) ───────────────────────
+# ── Sub-score bars ────────────────────────────────────────────────────
 
 def _subscore_bars(row: dict) -> list[dict]:
-    """Ordered sub-score list for rendering bars.
-
-    PRD weight order: role_fit → hard_skill → seniority → industry → desirability → evidence.
-    Each entry: {key, label, score, max, ratio, band} where band ∈ {strong, ok, weak}.
-    """
     out = []
     for _, col, label, max_val in _SUBSCORES:
         score, ratio = _sub(row, col, max_val)
@@ -215,10 +365,41 @@ def _subscore_bars(row: dict) -> list[dict]:
     return out
 
 
+# ── Public API ────────────────────────────────────────────────────────
+
+def explain_row(row: dict) -> dict:
+    """Return all explanation fields for this row.
+
+    The renderer picks what it needs per tier:
+        Apply  → one_liner + why_fits + watch_outs + tag surfaces
+        Review → one_liner + holding_back + still_worth + tag surfaces
+        Skip   → one_liner (optional) + skip_reason
+    """
+    rec = str(row.get("recommendation", "") or "").strip() or "Skip"
+    return {
+        "recommendation": rec,
+        "one_liner": _one_liner(row),
+        "matched_skills": _matched_skills(row),
+        "gap_skills": _gap_skills(row),
+        "adjacent_familiar": _adjacent_familiar(row),
+        "evidence_anchors": _evidence_anchors(row),
+        "deliverables_in_jd": _deliverables_in_jd(row),
+        "why_fits": _why_fits(row),
+        "watch_outs": _watch_outs(row),
+        "holding_back": _holding_back(row),
+        "still_worth": _still_worth(row),
+        "skip_reason": _skip_reason(row),
+        "subscore_bars": _subscore_bars(row),
+    }
+
+
 # ── Helpers ───────────────────────────────────────────────────────────
 
+def _same_line(a: str, b: str) -> bool:
+    return a.strip().lower() == b.strip().lower()
+
+
 def _dedupe(items: list[str]) -> list[str]:
-    """Stable de-dup preserving first occurrence."""
     seen = set()
     out = []
     for i in items:

@@ -1,18 +1,18 @@
-"""Trust-first digest HTML renderer (R4-02).
+"""Trust-first digest HTML renderer (R4-02, refined 2026-04-23).
 
-Builds the full email body from:
-    - scored DataFrame (rows already carry R3-05 score + audit columns)
-    - funnel + bottleneck dicts from bottleneck.py
-    - pending_feedback list + feedback_summary dict from state.py
+Layout (top-to-bottom):
+    1. Header: title + date + scope/freshness line + optional bottleneck headline
+    2. Apply cards (one-liner + bars + why/watch-outs + concrete tags + actions)
+    3. Review cards (one-liner + bars + holding-back/still-worth + tags + actions)
+    4. Pending feedback (moved below Review per user rule 2026-04-23)
+    5. Skip section (collapsed: top reasons + borderline-audit with full actions)
+    6. Funnel block (3 bands + LLM usage visibility)
+    7. Feedback summary (Kept / Rejected / Notes + common themes + history link)
+    8. Footer
 
-All explanation strings come from explain.explain_row(); this module
-is pure layout + CSS. No LLM, no Python-side computation of scores.
-
-Telegram deep-link card actions are produced here from the row URL:
-    Open JD  → row.job_url
-    Keep     → tg://start good_<id>
-    Reject   → tg://start skip_<id>
-    Note     → tg://start note_<id>
+Every explanation string in this file comes from explain.explain_row(),
+which is pure sub-score + aggregate signal math — no LLM. The renderer
+itself does no computation on scores.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from typing import Any
 
 from jinja2 import Template
 
-from src.digest.bottleneck import compute_trust_status_line
+from src.digest.bottleneck import compute_scope_line, compute_trust_status_line
 from src.digest.explain import explain_row
 
 
@@ -42,7 +42,7 @@ def _job_id_from_url(url: str) -> str:
     return "hx_" + _hashlib.md5(url.encode()).hexdigest()[:12]
 
 
-# ── Card dict (renderer-facing view of a row) ─────────────────────────
+# ── Card dict builder ─────────────────────────────────────────────────
 
 def _card(row: dict, tg_username: str) -> dict:
     expl = explain_row(row)
@@ -74,26 +74,27 @@ def _card(row: dict, tg_username: str) -> dict:
         "url_note": _tg("note"),
         "final_score": int(row.get("final_score", 0) or 0),
         "recommendation": expl["recommendation"],
+        "one_liner": expl["one_liner"],
         "subscore_bars": expl["subscore_bars"],
-        "why_apply": expl["why_apply"],
+        "matched_skills": expl["matched_skills"],
+        "gap_skills": expl["gap_skills"],
+        "adjacent_familiar": expl["adjacent_familiar"],
+        "evidence_anchors": expl["evidence_anchors"],
+        "why_fits": expl["why_fits"],
         "watch_outs": expl["watch_outs"],
         "holding_back": expl["holding_back"],
         "still_worth": expl["still_worth"],
         "skip_reason": expl["skip_reason"],
-        "blockers": str(row.get("blockers", "") or ""),
     }
 
 
 # ── Skip aggregation ──────────────────────────────────────────────────
 
 def _aggregate_skip_reasons(skip_cards: list[dict]) -> list[dict]:
-    """Count Skip cards by their 1-line skip_reason, top 5 most frequent."""
     counts: dict[str, int] = {}
     for c in skip_cards:
         key = (c.get("skip_reason") or "Skipped").strip()
         counts[key] = counts.get(key, 0) + 1
-    # If "Other pre-filter" or a catch-all bucket grows >10, we surface
-    # the drop_reason distribution in a sub-line so the user sees it split.
     return [
         {"label": lbl, "count": n}
         for lbl, n in sorted(counts.items(), key=lambda kv: -kv[1])
@@ -101,10 +102,26 @@ def _aggregate_skip_reasons(skip_cards: list[dict]) -> list[dict]:
 
 
 def _borderline_skips(skip_cards: list[dict], lo: int = 45, hi: int = 49) -> list[dict]:
-    """Skip cards in the audit-worthy score band, sorted by final_score desc."""
     out = [c for c in skip_cards if lo <= c["final_score"] <= hi]
     out.sort(key=lambda c: -c["final_score"])
     return out[:5]
+
+
+# ── LLM usage block (derived from sub_counters + cap counters) ────────
+
+def _llm_usage(
+    sub_counters: dict | None,
+    llm_evaluated: int,
+    llm_skipped_by_gates: int,
+) -> dict:
+    c = sub_counters or {}
+    return {
+        "evaluated": int(llm_evaluated),
+        "skipped_by_gates": int(llm_skipped_by_gates),
+        "cache_hits": int(c.get("skill_cache_hits", 0)),
+        "extraction_failures": int(c.get("skill_extraction_failures", 0)),
+        "skill_llm_calls": int(c.get("skill_llm_calls", 0)),
+    }
 
 
 # ── Main entry point ──────────────────────────────────────────────────
@@ -117,13 +134,16 @@ def render_trust_digest(
     feedback_summary: dict | None = None,
     keyword_stats: list[dict] | None = None,
     tg_bot_username: str | None = None,
+    total_new: int | None = None,
+    role_groups: int = 0,
+    hours_window: int = 24,
+    llm_evaluated: int = 0,
+    llm_skipped_by_gates: int = 0,
+    sub_counters: dict | None = None,
+    feedback_history_url: str | None = None,
+    preview_mode: bool = False,
 ) -> str:
-    """Return the full HTML digest string.
-
-    `df` must carry the R3-05 columns (recommendation, final_score,
-    score_role_fit, …). Rows without those fields render as Skip with
-    0-score bars — no crash, just empty.
-    """
+    """Return the full HTML digest string."""
     tg = tg_bot_username if tg_bot_username is not None else os.getenv("TG_BOT_USERNAME", "")
 
     cards = [_card(row.to_dict(), tg) for _, row in df.iterrows()]
@@ -131,23 +151,35 @@ def render_trust_digest(
     review_cards = [c for c in cards if c["recommendation"] == "Review"]
     skip_cards = [c for c in cards if c["recommendation"] == "Skip"]
 
-    # Sort within tiers by final_score desc for stable ordering
     apply_cards.sort(key=lambda c: -c["final_score"])
     review_cards.sort(key=lambda c: -c["final_score"])
 
     borderline = _borderline_skips(skip_cards)
     skip_top_reasons = _aggregate_skip_reasons(skip_cards)
 
-    trust_line = compute_trust_status_line(
-        apply_count=len(apply_cards),
-        review_count=len(review_cards),
-        borderline_skip_count=len(borderline),
-    )
+    # Header: scope line if we have the data, trust line as fallback
+    if total_new is not None and total_new > 0:
+        header_line = compute_scope_line(
+            apply_count=len(apply_cards),
+            review_count=len(review_cards),
+            borderline_skip_count=len(borderline),
+            total_new=total_new,
+            role_groups=role_groups,
+            hours_window=hours_window,
+        )
+    else:
+        header_line = compute_trust_status_line(
+            apply_count=len(apply_cards),
+            review_count=len(review_cards),
+            borderline_skip_count=len(borderline),
+        )
+
+    llm_usage = _llm_usage(sub_counters, llm_evaluated, llm_skipped_by_gates)
 
     template = Template(_TEMPLATE)
     return template.render(
         date=datetime.now().strftime("%Y-%m-%d"),
-        trust_line=trust_line,
+        header_line=header_line,
         bottleneck_headline=bottleneck_headline,
         apply_cards=apply_cards,
         review_cards=review_cards,
@@ -159,7 +191,10 @@ def render_trust_digest(
         pending_feedback=pending_feedback or [],
         feedback_summary=feedback_summary or {"kept": 0, "rejected": 0, "notes": 0, "themes": []},
         keyword_stats=keyword_stats or [],
+        llm_usage=llm_usage,
         tg_enabled=bool(tg),
+        feedback_history_url=feedback_history_url or "",
+        preview_mode=preview_mode,
     )
 
 
@@ -179,12 +214,15 @@ _TEMPLATE = r"""
   .trust-line { font-size: 14px; color: #1d1d1f; font-weight: 600; margin-bottom: 6px; }
   .sub { color: #86868b; font-size: 12px; margin-bottom: 10px; }
   .bottleneck { background: #fff7ea; border: 1px solid #f0c56a; color: #7a4e00; padding: 8px 12px; border-radius: 8px; margin: 10px 0 16px 0; font-size: 13px; }
+  .preview-banner { background: #f1eaff; border: 1px solid #c8b8ff; color: #462b85; padding: 8px 12px; border-radius: 8px; margin: 0 0 12px 0; font-size: 12px; }
 
   .card { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); padding: 14px 16px; margin-bottom: 12px; }
   .card .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
   .card .title { font-weight: 600; font-size: 15px; margin-bottom: 2px; }
   .card .title a { color: #0066cc; text-decoration: none; }
-  .card .meta { color: #515154; font-size: 12px; margin-bottom: 8px; }
+  .card .meta { color: #515154; font-size: 12px; margin-bottom: 6px; }
+  .card .one-liner { color: #1d1d1f; font-size: 13px; font-style: italic; margin: 6px 0 10px 0; padding: 6px 10px; background: #f8f9fa; border-left: 3px solid #0066cc; border-radius: 0 6px 6px 0; }
+
   .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.2px; }
   .pill.apply { background: #d4edda; color: #1b5e20; }
   .pill.review { background: #fff3cd; color: #7c5e00; }
@@ -200,6 +238,15 @@ _TEMPLATE = r"""
   .bar-fill.ok { background: #d69e2e; }
   .bar-fill.weak { background: #c53030; }
   .bar-num { width: 48px; text-align: right; color: #515154; font-variant-numeric: tabular-nums; }
+
+  .tags { margin: 8px 0; font-size: 12px; color: #333; }
+  .tags .tag-line { margin-bottom: 3px; }
+  .tags .tag-label { display: inline-block; min-width: 78px; color: #86868b; }
+  .tag-chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; margin-right: 4px; margin-bottom: 2px; }
+  .tag-chip.match { background: #e3f4e7; color: #1b5e20; }
+  .tag-chip.gap { background: #fbe3e3; color: #7a2424; }
+  .tag-chip.adj { background: #f1f3f5; color: #555; }
+  .tag-chip.ev { background: #e8eefc; color: #214ba8; }
 
   .reasons { margin: 6px 0 4px 0; }
   .reasons .label { font-weight: 600; font-size: 12px; color: #1d1d1f; margin-right: 6px; }
@@ -219,11 +266,14 @@ _TEMPLATE = r"""
 
   .skip-summary { background: #fff; border-radius: 10px; padding: 12px 16px; margin-bottom: 12px; }
   .skip-summary ul { margin: 6px 0 4px 18px; padding: 0; color: #333; font-size: 13px; }
-  .borderline { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e0e0e0; }
-  .borderline .b-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 13px; }
-  .borderline .b-title { color: #1d1d1f; }
-  .borderline .b-title a { color: #0066cc; text-decoration: none; }
-  .borderline .b-score { font-weight: 700; color: #7c5e00; margin-left: 12px; }
+  .borderline { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e0e0e0; }
+  .borderline .sub-header { font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+  .borderline-card { background: #fafafa; border: 1px solid #eee; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .borderline-card .b-head { display: flex; justify-content: space-between; align-items: center; }
+  .borderline-card .b-title a { color: #0066cc; text-decoration: none; font-weight: 600; font-size: 13px; }
+  .borderline-card .b-one-liner { color: #515154; font-size: 12px; font-style: italic; margin: 3px 0 6px 0; }
+  .borderline-card .b-reason { color: #7c5e00; font-size: 12px; margin-bottom: 4px; }
+  .borderline-card .b-score { font-weight: 700; color: #7c5e00; }
 
   .funnel { background: #fff; border-radius: 10px; padding: 12px 16px; margin-bottom: 12px; }
   .funnel table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -233,6 +283,8 @@ _TEMPLATE = r"""
   .funnel .band.notsurf { color: #555; }
   .funnel .band.surf { color: #1b5e20; }
   .funnel .num { text-align: right; font-variant-numeric: tabular-nums; width: 80px; }
+  .funnel .llm { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee; font-size: 12px; color: #515154; }
+  .funnel .llm b { color: #1d1d1f; }
 
   .pending, .feedback-summary { background: #fff; border-radius: 10px; padding: 12px 16px; margin-bottom: 12px; }
   .pending .row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; font-size: 13px; border-bottom: 1px dashed #eee; }
@@ -247,29 +299,13 @@ _TEMPLATE = r"""
 <div class="wrap">
 
   <h1>Jobsearcher · Trust digest</h1>
-  <div class="trust-line">Trust status today: {{ trust_line }}</div>
+  <div class="trust-line">{{ header_line }}</div>
   <div class="sub">{{ date }}</div>
+  {% if preview_mode %}
+  <div class="preview-banner"><b>Preview:</b> this is a rendered sample. Open-JD links point to real job URLs; Keep / Reject / Note buttons are placeholders and will only work in a live digest delivered to Telegram.</div>
+  {% endif %}
   {% if bottleneck_headline %}
   <div class="bottleneck"><b>Main bottleneck today:</b> {{ bottleneck_headline }}</div>
-  {% endif %}
-
-  {# ── Pending feedback block ─────────────────────────────── #}
-  {% if pending_feedback %}
-  <h2>Feedback still pending ({{ pending_feedback|length }})</h2>
-  <div class="pending">
-    <div class="sub">From the previous digest, no Keep / Reject / Note yet:</div>
-    {% for p in pending_feedback %}
-    <div class="row">
-      <div>
-        <b>{{ p.title }}</b> — {{ p.company }}
-        <span class="row-meta"> · <span class="pill {% if p.recommendation == 'Apply' %}apply{% elif p.recommendation == 'Review' %}review{% else %}skip{% endif %}">{{ p.recommendation }}</span> · {{ p.final_score }}/100</span>
-      </div>
-      <div>
-        {% if p.job_url %}<a class="btn open" href="{{ p.job_url }}">Open JD</a>{% endif %}
-      </div>
-    </div>
-    {% endfor %}
-  </div>
   {% endif %}
 
   {# ── Apply cards ─────────────────────────────────────────── #}
@@ -285,6 +321,8 @@ _TEMPLATE = r"""
       </div>
       <div class="score">{{ c.final_score }}/100</div>
     </div>
+    <div class="one-liner">{{ c.one_liner }}</div>
+
     <div class="bars">
       {% for b in c.subscore_bars %}
       <div class="bar-row">
@@ -294,10 +332,21 @@ _TEMPLATE = r"""
       </div>
       {% endfor %}
     </div>
-    {% if c.why_apply %}
+
+    {# Concrete signal chips #}
+    {% if c.matched_skills or c.gap_skills or c.adjacent_familiar or c.evidence_anchors %}
+    <div class="tags">
+      {% if c.matched_skills %}<div class="tag-line"><span class="tag-label">Matched:</span>{% for s in c.matched_skills %}<span class="tag-chip match">{{ s }}</span>{% endfor %}</div>{% endif %}
+      {% if c.gap_skills %}<div class="tag-line"><span class="tag-label">Gap:</span>{% for s in c.gap_skills %}<span class="tag-chip gap">{{ s }}</span>{% endfor %}</div>{% endif %}
+      {% if c.adjacent_familiar %}<div class="tag-line"><span class="tag-label">Adjacent:</span>{% for s in c.adjacent_familiar %}<span class="tag-chip adj">{{ s }}</span>{% endfor %}</div>{% endif %}
+      {% if c.evidence_anchors %}<div class="tag-line"><span class="tag-label">Evidence:</span>{% for s in c.evidence_anchors %}<span class="tag-chip ev">{{ s }}</span>{% endfor %}</div>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if c.why_fits %}
     <div class="reasons why">
-      <div><span class="label">✅ Why Apply</span></div>
-      <ul>{% for r in c.why_apply %}<li>{{ r }}</li>{% endfor %}</ul>
+      <div><span class="label">✅ Why it may fit</span></div>
+      <ul>{% for r in c.why_fits %}<li>{{ r }}</li>{% endfor %}</ul>
     </div>
     {% endif %}
     {% if c.watch_outs %}
@@ -331,6 +380,8 @@ _TEMPLATE = r"""
       </div>
       <div class="score">{{ c.final_score }}/100</div>
     </div>
+    <div class="one-liner">{{ c.one_liner }}</div>
+
     <div class="bars">
       {% for b in c.subscore_bars %}
       <div class="bar-row">
@@ -340,6 +391,16 @@ _TEMPLATE = r"""
       </div>
       {% endfor %}
     </div>
+
+    {% if c.matched_skills or c.gap_skills or c.adjacent_familiar or c.evidence_anchors %}
+    <div class="tags">
+      {% if c.matched_skills %}<div class="tag-line"><span class="tag-label">Matched:</span>{% for s in c.matched_skills %}<span class="tag-chip match">{{ s }}</span>{% endfor %}</div>{% endif %}
+      {% if c.gap_skills %}<div class="tag-line"><span class="tag-label">Gap:</span>{% for s in c.gap_skills %}<span class="tag-chip gap">{{ s }}</span>{% endfor %}</div>{% endif %}
+      {% if c.adjacent_familiar %}<div class="tag-line"><span class="tag-label">Adjacent:</span>{% for s in c.adjacent_familiar %}<span class="tag-chip adj">{{ s }}</span>{% endfor %}</div>{% endif %}
+      {% if c.evidence_anchors %}<div class="tag-line"><span class="tag-label">Evidence:</span>{% for s in c.evidence_anchors %}<span class="tag-chip ev">{{ s }}</span>{% endfor %}</div>{% endif %}
+    </div>
+    {% endif %}
+
     {% if c.holding_back %}
     <div class="reasons holding">
       <div><span class="label">What's holding this back?</span></div>
@@ -364,7 +425,26 @@ _TEMPLATE = r"""
   {% endfor %}
   {% endif %}
 
-  {# ── Skip summary (collapsed) + borderline audit ─────────── #}
+  {# ── Pending feedback (moved below Review per user rule) ── #}
+  {% if pending_feedback %}
+  <h2>Feedback still pending ({{ pending_feedback|length }})</h2>
+  <div class="pending">
+    <div class="sub">From the previous digest, no Keep / Reject / Note yet:</div>
+    {% for p in pending_feedback %}
+    <div class="row">
+      <div>
+        <b>{{ p.title }}</b> — {{ p.company }}
+        <span class="row-meta"> · <span class="pill {% if p.recommendation == 'Apply' %}apply{% elif p.recommendation == 'Review' %}review{% else %}skip{% endif %}">{{ p.recommendation }}</span> · {{ p.final_score }}/100</span>
+      </div>
+      <div>
+        {% if p.job_url %}<a class="btn open" href="{{ p.job_url }}">Open JD</a>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ── Skip summary (collapsed) + borderline audit w/ actions ── #}
   {% if skip_cards %}
   <h2>Skip ({{ skip_count }}) — collapsed</h2>
   <div class="skip-summary">
@@ -378,11 +458,25 @@ _TEMPLATE = r"""
     {% endif %}
     {% if borderline %}
     <div class="borderline">
-      <div><b>Borderline skips worth audit (score 45–49):</b></div>
+      <div class="sub-header">Borderline skips worth audit (score 45–49)</div>
       {% for b in borderline %}
-      <div class="b-row">
-        <div class="b-title"><a href="{{ b.url_open }}">{{ b.title }}</a> — {{ b.company }}</div>
-        <div class="b-score">{{ b.final_score }}/100</div>
+      <div class="borderline-card">
+        <div class="b-head">
+          <div>
+            <div class="b-title"><a href="{{ b.url_open }}">{{ b.title }}</a> — {{ b.company }}</div>
+            <div class="b-one-liner">{{ b.one_liner }}</div>
+            <div class="b-reason">{{ b.skip_reason }}</div>
+          </div>
+          <div class="b-score">{{ b.final_score }}/100</div>
+        </div>
+        <div class="actions">
+          <a class="btn open" href="{{ b.url_open }}">Open JD</a>
+          {% if tg_enabled %}
+            <a class="btn keep" href="{{ b.url_keep }}">Keep</a>
+            <a class="btn reject" href="{{ b.url_reject }}">Reject</a>
+            <a class="btn note" href="{{ b.url_note }}">Note</a>
+          {% endif %}
+        </div>
       </div>
       {% endfor %}
     </div>
@@ -390,15 +484,23 @@ _TEMPLATE = r"""
   </div>
   {% endif %}
 
-  {# ── 3-band funnel ───────────────────────────────────────── #}
+  {# ── Funnel block (3 bands + LLM usage visibility) ─────── #}
   <h2>Funnel today</h2>
   <div class="funnel">
     <table>
       <tr><td class="band filtered">FILTERED (before scoring)</td><td class="num">{{ funnel.pre_scoring_filtered }}</td></tr>
-      <tr><td class="band notsurf">SCORED BUT NOT SURFACED</td><td class="num">{{ funnel.not_surfaced_scored }}</td></tr>
-      <tr><td class="band surf">SCORED & SURFACED (Apply + Review)</td><td class="num">{{ funnel.surfaced }}</td></tr>
-      <tr><td class="sub" colspan="2">Total scraped: {{ funnel.total_scraped }} · Scored total: {{ funnel.scored_total }} · Filtered: {{ funnel.filtered_pct }}% · Surfaced: {{ funnel.surfaced_pct }}%</td></tr>
+      <tr><td class="band notsurf">SCORED BUT NOT SHOWN</td><td class="num">{{ funnel.not_surfaced_scored }}</td></tr>
+      <tr><td class="band surf">SHOWN IN TODAY'S DIGEST (Apply + Review)</td><td class="num">{{ funnel.surfaced }}</td></tr>
+      <tr><td class="sub" colspan="2">Total scraped: {{ funnel.total_scraped }} · Scored total: {{ funnel.scored_total }} · Filtered: {{ funnel.filtered_pct }}% · Shown: {{ funnel.surfaced_pct }}%</td></tr>
     </table>
+    <div class="llm">
+      <b>LLM usage today:</b>
+      evaluated <b>{{ llm_usage.evaluated }}</b> ·
+      skipped by hard gates <b>{{ llm_usage.skipped_by_gates }}</b> ·
+      skill-extract LLM calls <b>{{ llm_usage.skill_llm_calls }}</b> ·
+      cache hits <b>{{ llm_usage.cache_hits }}</b> ·
+      extraction failures <b>{{ llm_usage.extraction_failures }}</b>
+    </div>
   </div>
 
   {# ── Feedback summary block ──────────────────────────────── #}
@@ -413,6 +515,11 @@ _TEMPLATE = r"""
       <li>{{ t.label }} — {{ t.count }}</li>
       {% endfor %}
     </ul>
+    {% endif %}
+    {% if feedback_history_url %}
+    <div class="sub" style="margin-top:6px;">
+      <a href="{{ feedback_history_url }}">View full feedback history →</a>
+    </div>
     {% endif %}
   </div>
   {% endif %}

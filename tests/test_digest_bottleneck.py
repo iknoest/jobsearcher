@@ -5,6 +5,7 @@ from __future__ import annotations
 from src.digest.bottleneck import (
     compute_bottleneck,
     compute_funnel,
+    compute_scope_line,
     compute_trust_status_line,
 )
 
@@ -100,3 +101,31 @@ def test_trust_line_omits_borderline_when_zero():
 def test_trust_line_singular_borderline():
     line = compute_trust_status_line(apply_count=0, review_count=0, borderline_skip_count=1)
     assert "1 borderline skip worth audit" in line
+
+
+# ── compute_scope_line ────────────────────────────────────────────────
+
+def test_scope_line_full_header_shape():
+    line = compute_scope_line(
+        apply_count=8, review_count=14, borderline_skip_count=5,
+        total_new=125, role_groups=7, hours_window=24,
+    )
+    assert "8 Apply" in line
+    assert "14 Review" in line
+    assert "5 borderline skips worth audit" in line
+    assert "125 new positions" in line
+    assert "7 role groups" in line
+    assert "past 24 hours" in line
+
+
+def test_scope_line_singular_plurals_handled():
+    line = compute_scope_line(1, 1, 1, total_new=1, role_groups=1, hours_window=1)
+    assert "1 borderline skip worth audit" in line
+    assert "1 new position " in line   # trailing space confirms singular form
+    assert "1 role group " in line
+    assert "past 1 hour" in line
+
+
+def test_scope_line_multi_day_window():
+    line = compute_scope_line(0, 0, 0, total_new=30, role_groups=3, hours_window=72)
+    assert "past 3 days" in line

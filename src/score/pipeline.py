@@ -200,9 +200,10 @@ def _score_one(row: pd.Series) -> dict:
         "scored_by_llm": extraction_source == "llm",
         "used_skill_cache": extraction_source == "cache",
         "llm_stage_skipped_reason": llm_skip_reason,
-        # Raw signals kept for audit / digest / explain (dict, survives pickling).
+        # Raw signals kept for audit / digest / explain (dicts, survive pickling).
         "_score_raw_hard_skill_signals": hs.get("signals", {}) or {},
         "_score_raw_role_fit_signals": rf.get("signals", {}) or {},
+        "_score_raw_evidence_signals": ev.get("signals", {}) or {},
     }
 
 

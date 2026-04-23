@@ -155,3 +155,44 @@ def compute_trust_status_line(
     if borderline_skip_count > 0:
         parts.append(f"{borderline_skip_count} borderline skip{'s' if borderline_skip_count != 1 else ''} worth audit")
     return ", ".join(parts)
+
+
+def compute_scope_line(
+    apply_count: int,
+    review_count: int,
+    borderline_skip_count: int,
+    total_new: int,
+    role_groups: int,
+    hours_window: int = 24,
+) -> str:
+    """Return the full header string: trust status + new-positions scope + freshness.
+
+    Example:
+        "8 Apply · 14 Review · 5 borderline skips worth audit out of
+         125 new positions found across 7 role groups in the past 24 hours"
+
+    `total_new` should be the post-dedup count (rows that actually reached
+    pre-rank this run), not the raw scrape count — the user cares about
+    what was genuinely new, not all rows we re-saw.
+    """
+    bits = [f"{apply_count} Apply", f"{review_count} Review"]
+    if borderline_skip_count > 0:
+        bits.append(
+            f"{borderline_skip_count} borderline skip{'s' if borderline_skip_count != 1 else ''} worth audit"
+        )
+    head = " · ".join(bits)
+    window = _format_hours(hours_window)
+    group_word = "role group" if role_groups == 1 else "role groups"
+    return (
+        f"{head} out of {total_new} new position{'s' if total_new != 1 else ''} found "
+        f"across {role_groups} {group_word} in the past {window}"
+    )
+
+
+def _format_hours(h: int) -> str:
+    if h <= 48:
+        return f"{h} hour{'s' if h != 1 else ''}"
+    days = h / 24
+    if days == int(days):
+        days = int(days)
+    return f"{days} days"

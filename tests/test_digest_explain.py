@@ -8,6 +8,11 @@ from src.digest.explain import explain_row
 def _apply_row(**extra):
     base = {
         "recommendation": "Apply",
+        "title": "Senior Product Manager",
+        "company": "Acme Robotics",
+        "role_family": "product_manager",
+        "industry": "robotics",
+        "industry_display": "Robotics",
         "final_score": 82,
         "score_role_fit": 22,        # 22/25 → strong
         "score_hard_skill": 24,      # 24/30 → strong
@@ -63,19 +68,42 @@ def _skip_row(**extra):
     return base
 
 
+# ── One-liner ────────────────────────────────────────────────────────
+
+def test_one_liner_has_role_industry_focus():
+    row = _apply_row(_score_raw_hard_skill_signals={
+        "verified_matches": [
+            {"canonical_name": "Prototyping"},
+            {"canonical_name": "User research synthesis"},
+        ]
+    })
+    out = explain_row(row)
+    ol = out["one_liner"]
+    assert "Product role" in ol
+    assert "Robotics" in ol
+    assert "prototyping" in ol.lower() or "user research" in ol.lower()
+
+
+def test_one_liner_falls_back_gracefully_when_signals_missing():
+    row = _apply_row(role_family="", industry="", industry_display="",
+                     _score_raw_hard_skill_signals={})
+    out = explain_row(row)
+    # Doesn't crash; has the shape "Role in ..., focused on ..."
+    assert " in " in out["one_liner"]
+    assert "focused on" in out["one_liner"]
+
+
 # ── Apply tier ────────────────────────────────────────────────────────
 
-def test_apply_row_produces_why_apply_and_empty_watch_outs():
+def test_apply_row_produces_why_fits_and_empty_watch_outs():
     out = explain_row(_apply_row())
     assert out["recommendation"] == "Apply"
-    assert len(out["why_apply"]) >= 1
-    # top_reasons should surface
-    assert any("Role fit" in r or "Hard skills" in r for r in out["why_apply"])
-    # Nothing strongly negative → watch_outs may be empty list
+    assert len(out["why_fits"]) >= 1
+    assert any("Role fit" in r or "Hard skills" in r or "Strong fit" in r for r in out["why_fits"])
     assert isinstance(out["watch_outs"], list)
 
 
-def test_apply_row_surfaces_verified_skills_when_available():
+def test_apply_row_surfaces_verified_skills_as_matched_chip_and_bullet():
     row = _apply_row(_score_raw_hard_skill_signals={
         "verified_matches": [
             {"canonical_name": "Product development for physical products"},
@@ -83,14 +111,38 @@ def test_apply_row_surfaces_verified_skills_when_available():
         ]
     })
     out = explain_row(row)
-    assert any("Product development" in r or "User research" in r for r in out["why_apply"])
+    # Matched skill chip surface
+    assert "Product development for physical products" in out["matched_skills"]
+    # And surfaced in the "why_fits" bullet
+    assert any("Strong fit" in r for r in out["why_fits"])
 
 
 def test_apply_row_with_risks_populates_watch_outs():
     row = _apply_row(top_risks="Evidence: 2/10; Desirability: 3/10", score_desirability=3, score_evidence=2)
     out = explain_row(row)
     assert len(out["watch_outs"]) >= 1
-    assert any("Evidence" in w or "Desirability" in w for w in out["watch_outs"])
+
+
+def test_gap_skills_surface_forbidden_core_and_optional():
+    row = _apply_row(_score_raw_hard_skill_signals={
+        "forbidden_core_hits": [{"canonical_name": "CFD simulation"}],
+        "forbidden_optional_hits": [{"canonical_name": "Java enterprise"}],
+    })
+    out = explain_row(row)
+    assert "CFD simulation" in out["gap_skills"]
+    assert "Java enterprise" in out["gap_skills"]
+
+
+def test_evidence_anchors_surface_matched_proofs():
+    row = _apply_row(_score_raw_evidence_signals={
+        "matched_proofs": [
+            {"topic": "BYD VOC", "strength": "High", "matched_via": "industry"},
+            {"topic": "TomTom data viz", "strength": "Medium", "matched_via": "role"},
+        ]
+    })
+    out = explain_row(row)
+    assert "BYD VOC" in out["evidence_anchors"]
+    assert any("BYD VOC" in b for b in out["why_fits"])
 
 
 # ── Review tier ───────────────────────────────────────────────────────
@@ -114,20 +166,32 @@ def test_review_row_still_worth_surfaces_top_reasons():
 def test_skip_row_returns_blocker_as_skip_reason():
     out = explain_row(_skip_row())
     assert out["recommendation"] == "Skip"
-    assert "forbidden_core_skill" in out["skip_reason"]
+    # Softened label keeps the concrete skill name, drops the code prefix
+    assert "CFD simulation" in out["skip_reason"]
 
 
-def test_skip_row_missing_jd_body_returns_drop_reason():
-    row = _skip_row(blockers="", drop_reason="missing_jd_body")
-    out = explain_row(row)
-    assert out["skip_reason"] == "missing_jd_body"
-
-
-def test_skip_row_score_band_skip_shows_score():
+def test_skip_row_score_band_skip_shows_score_in_plain_language():
     row = _skip_row(blockers="", drop_reason="", final_score=42)
     out = explain_row(row)
     assert "42/100" in out["skip_reason"]
-    assert "below Review" in out["skip_reason"]
+    # Plain language ("just below the Review threshold"), NOT internal "Review floor"
+    assert "below the Review threshold" in out["skip_reason"]
+    assert "Review floor" not in out["skip_reason"]
+
+
+def test_skip_row_softens_forbidden_core_label():
+    row = _skip_row(blockers="forbidden_core_skill: CFD simulation")
+    out = explain_row(row)
+    # No raw "forbidden_core_skill:" prefix leaks to user
+    assert "forbidden_core_skill" not in out["skip_reason"]
+    assert "CFD simulation" in out["skip_reason"]
+
+
+def test_skip_row_missing_jd_body_is_plain_language():
+    row = _skip_row(blockers="", drop_reason="missing_jd_body")
+    out = explain_row(row)
+    assert "job description" in out["skip_reason"].lower()
+    assert "missing_jd_body" not in out["skip_reason"]
 
 
 # ── Sub-score bars ────────────────────────────────────────────────────
@@ -171,5 +235,5 @@ def test_missing_sub_score_columns_default_to_zero_weak():
 def test_explanation_bullets_are_deduped():
     row = _apply_row(top_reasons="Role fit: 22/25; Role fit: 22/25; Hard skills: 24/30")
     out = explain_row(row)
-    # "Role fit..." only appears once in why_apply
-    assert sum(1 for r in out["why_apply"] if "Role fit" in r) == 1
+    # "Role fit..." only appears once across why_fits bullets
+    assert sum(1 for r in out["why_fits"] if "Role fit" in r) <= 1

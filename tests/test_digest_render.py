@@ -90,7 +90,7 @@ def test_render_returns_html_string():
 
 def test_render_includes_trust_status_line():
     html = render_trust_digest(_sample_df(), funnel=_funnel_default(), tg_bot_username="")
-    assert "Trust status today" in html
+    # Header renders the counts line directly (no "Trust status today:" prefix)
     assert "1 Apply" in html
     assert "1 Review" in html
 
@@ -110,7 +110,8 @@ def test_render_apply_section_has_card():
     html = render_trust_digest(_sample_df(), funnel=_funnel_default(), tg_bot_username="")
     assert "Apply (1)" in html
     assert "Senior Product Manager" in html
-    assert "Why Apply" in html
+    # New copy: "Why it may fit"
+    assert "Why it may fit" in html
 
 
 def test_render_review_section_has_holding_back():
@@ -131,8 +132,66 @@ def test_render_skip_section_collapsed_with_top_reasons_and_borderline():
 def test_render_funnel_block_numbers_visible():
     html = render_trust_digest(_sample_df(), funnel=_funnel_default(), tg_bot_username="")
     assert "FILTERED (before scoring)" in html
-    assert "SCORED BUT NOT SURFACED" in html
-    assert "SCORED & SURFACED" in html
+    # Plain-language: "SCORED BUT NOT SHOWN" instead of "NOT SURFACED"
+    assert "NOT SHOWN" in html
+    assert "SHOWN IN TODAY" in html
+
+
+def test_render_llm_usage_block_visible():
+    html = render_trust_digest(
+        _sample_df(),
+        funnel=_funnel_default(),
+        llm_evaluated=12, llm_skipped_by_gates=30,
+        sub_counters={"skill_llm_calls": 8, "skill_cache_hits": 4, "skill_extraction_failures": 0},
+        tg_bot_username="",
+    )
+    assert "LLM usage today" in html
+    assert "evaluated" in html
+    assert "skipped by hard gates" in html
+    assert "cache hits" in html
+
+
+def test_render_scope_line_when_total_new_provided():
+    html = render_trust_digest(
+        _sample_df(),
+        funnel=_funnel_default(),
+        total_new=125, role_groups=7, hours_window=24,
+        tg_bot_username="",
+    )
+    assert "125 new positions" in html
+    assert "7 role groups" in html
+    assert "past 24 hours" in html
+
+
+def test_render_preview_banner_only_in_preview_mode():
+    html_off = render_trust_digest(_sample_df(), funnel=_funnel_default(), tg_bot_username="", preview_mode=False)
+    assert "Preview:" not in html_off
+    html_on = render_trust_digest(_sample_df(), funnel=_funnel_default(), tg_bot_username="", preview_mode=True)
+    assert "Preview:" in html_on
+    assert "placeholders" in html_on
+
+
+def test_render_pending_feedback_comes_after_review_section():
+    pending = [{"job_url": "https://x.com/j/1", "title": "PrevJob", "company": "Co", "recommendation": "Apply", "final_score": 81}]
+    html = render_trust_digest(_sample_df(), funnel=_funnel_default(), pending_feedback=pending, tg_bot_username="")
+    review_idx = html.find("Review (1)")
+    pending_idx = html.find("Feedback still pending")
+    assert review_idx > 0 and pending_idx > 0
+    assert pending_idx > review_idx, "Pending feedback must render AFTER the Review section"
+
+
+def test_render_borderline_cards_have_full_actions_when_tg_enabled():
+    html = render_trust_digest(_sample_df(), funnel=_funnel_default(), tg_bot_username="jobsearch_bot")
+    # Borderline card section present
+    assert "Borderline skips worth audit" in html
+    # Our Edge Case Borderline (score 47) should be in there with action buttons
+    assert "Edge Case Borderline" in html
+    # Per-borderline actions: both Open JD and Keep/Reject/Note should be present
+    bl_idx = html.find("Borderline skips worth audit")
+    after_borderline = html[bl_idx:bl_idx + 2500]
+    assert 'class="btn keep"' in after_borderline
+    assert 'class="btn reject"' in after_borderline
+    assert 'class="btn note"' in after_borderline
 
 
 def test_render_tg_buttons_only_when_bot_configured():
@@ -164,5 +223,6 @@ def test_render_feedback_summary_block_appears_when_activity_exists():
 def test_render_handles_empty_dataframe():
     empty = pd.DataFrame(columns=["job_url", "title", "company", "recommendation", "final_score"])
     html = render_trust_digest(empty, funnel=compute_funnel(0, 0, 0, 0, 0, 0, 0), tg_bot_username="")
-    # Does not crash; header still present
-    assert "Trust status today" in html
+    # Does not crash; header renders with 0s
+    assert "0 Apply" in html and "0 Review" in html
+    assert "Funnel today" in html
