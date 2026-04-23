@@ -60,11 +60,14 @@ Automated job search tool for the Netherlands market. Scrapes, filters, and scor
 4. Travel time
 4.2. Sheet + fuzzy dedup (remove already-scored jobs by URL, then title+company)
 4.5. Pre-rank (rule-based scoring, no LLM)
-5. LLM scoring (KeySkills, RoleSummary, WhyFit, Gaps, Confidence)
+4.8. **Sub-scorers + aggregate** (R3-05) — 6 interpretable sub-scores (role_fit / hard_skill / seniority_fit / industry_proximity / desirability / evidence) → `final_score` 0-100 + deterministic `recommendation` (Apply ≥70 / Review 50-69 / Skip <50 or blocker). Attaches audit columns (drop_stage, drop_reason, skill_extract_source, scored_by_llm, used_skill_cache, llm_stage_skipped_reason) to every row. Only `hard_skill` uses an LLM (cheap 2-provider skill-extract chain, cached by URL + JD-hash).
+5. LLM scoring — **gated** on `recommendation != "Skip"` and a --max-jobs cap. Skip rows and below-cap rows bypass the heavy matcher entirely; they still flow into Sheets + digest with match_score mirrored from final_score (Review → Maybe for legacy consumers).
 6. Sheets sync
 7. Email digest (View button per card; Good match / Skip via Telegram deep links)
 
 Language + location filtering MUST happen before scoring — never after. Phygital=True requires physical/hardware context; "IoT"/"AI"/"digital twin" alone are not sufficient.
+
+**LLM gating rule (R3-05):** the heavy matcher LLM only runs after language, location, role-hard, seniority-hard, dedup, successful JD parsing, AND an Apply/Review verdict from the sub-scorer aggregate. The cheap skill-extract LLM runs one step earlier (per row with JD body) and is disk-cached. Pipeline prints LLM observability per run: `evaluated / skipped_by_gates / cache_hits / extraction_failures`.
 
 ## CLI Flags
 - `--manual` — Full pipeline (scrape + filter + prerank + LLM + sheets + email)

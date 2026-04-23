@@ -12,6 +12,8 @@ import os
 import sys
 import time
 
+import pandas as pd
+
 # Force UTF-8 stdout so Traditional Chinese from LLM doesn't crash on Windows cp1252.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -35,6 +37,7 @@ from src.prerank import apply_prerank, split_by_prerank
 from src.classify.role_family import classify_dataframe as classify_role_families
 from src.classify.industry import classify_dataframe as classify_industries
 from src.classify.seniority import classify_dataframe as classify_seniorities
+from src.score.pipeline import run_and_print as run_sub_scorers_and_print
 
 
 def _apply_classify_stage(jobs):
@@ -222,7 +225,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
     sheet_rules = {"weight_adjustments": {}, "keyword_blocks": [], "keyword_adds": [],
                    "company_boosts": {}, "company_demotes": {}}
     if spreadsheet_id:
-        print("\n[0/7] Syncing feedback + reading rules...")
+        print("\n[0/8] Syncing feedback + reading rules...")
         setup_tabs(spreadsheet_id)
         sync_verdicts_from_sheet(spreadsheet_id)
         sheet_rules = read_rules(spreadsheet_id)
@@ -234,7 +237,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         print(f"  Active weight adjustments: {weight_adjustments}")
 
     # Step 1: Scrape
-    print("\n[1/7] Scraping jobs...")
+    print("\n[1/8] Scraping jobs...")
     t0 = time.time()
     tiers = ["primary"] if quick else None
     jobs, keyword_counts = scrape_all_keywords(tiers=tiers)
@@ -258,7 +261,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
     total_scraped = len(jobs)
 
     # Step 2: Language pre-filter (hard reject Dutch-mandatory jobs)
-    print("\n[2/7] Language pre-filter...")
+    print("\n[2/8] Language pre-filter...")
     t0 = time.time()
     jobs, lang_rejections = language_prefilter(jobs)
     if lang_rejections:
@@ -271,7 +274,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         return
 
     # Step 2.5: Location filter (hard reject non-NL, non-remote jobs)
-    print("\n[2.5/7] Location filter (NL + remote only)...")
+    print("\n[2.5/8] Location filter (NL + remote only)...")
     t0 = time.time()
     jobs, loc_rejections = location_filter(jobs)
     if loc_rejections:
@@ -286,7 +289,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         return
 
     # Step 3: Enrich + remaining filters
-    print("\n[3/7] Enriching & filtering...")
+    print("\n[3/8] Enriching & filtering...")
     t0 = time.time()
     jobs, filter_log = enrich_and_filter(jobs)
     filter_log = lang_rejections + loc_rejections + filter_log
@@ -301,7 +304,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         return
 
     # Step 3b: Role-family + industry classification (PRD §8 Stage 4 / Jobsearcher Stage 3b)
-    print("\n[3b/7] Classification (role family + industry + seniority) + hard-reject gate...")
+    print("\n[3b/8] Classification (role family + industry + seniority) + hard-reject gate...")
     t0 = time.time()
     before_rf = len(jobs)
     jobs, rf_rejections = _apply_classify_stage(jobs)
@@ -347,7 +350,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         return
 
     # Step 4: Travel time
-    print("\n[4/7] Estimating travel times...")
+    print("\n[4/8] Estimating travel times...")
     t0 = time.time()
     origin = os.getenv("HOME_STATION", "Hoofddorp")
     arrival = os.getenv("ARRIVAL_TIME", "09:00")
@@ -368,7 +371,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         return
 
     # Step 4.2: Dedup against Sheet + fuzzy title/company dedup (no LLM, saves quota)
-    print("\n[4.2/7] Deduplicating against Sheet + title/company...")
+    print("\n[4.2/8] Deduplicating against Sheet + title/company...")
     t0 = time.time()
     import pandas as pd
     before_dedup = len(jobs)
@@ -399,7 +402,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         return
 
     # Step 4.5: Pre-rank — cheap, rule-based scoring before the LLM
-    print("\n[4.5/7] Applying pre-rank (rule-based, no LLM)...")
+    print("\n[4.5/8] Applying pre-rank (rule-based, no LLM)...")
     t0 = time.time()
     jobs = apply_prerank(jobs)
     _print_prerank_summary(jobs, top_n=min(20, len(jobs)))
@@ -412,22 +415,67 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         print(f"Total pipeline time: {time.time() - pipeline_start:.0f}s")
         return
 
-    # Step 5: LLM scoring — selects top N by pre-rank, not first N
+    # Step 4.8 (R3-05): Sub-scorers + aggregate → recommendation per row.
+    # This is the new trust surface: role_fit / hard_skill / seniority_fit /
+    # industry_proximity / desirability / evidence + final_score + Apply/Review/Skip.
+    # Only `hard_skill` uses an LLM (skill extraction, cheap 2-provider chain,
+    # cached by job_url + JD-hash). Heavy matcher LLM in step 5 is GATED on
+    # the recommendation so Skip rows never consume quota.
+    print("\n[4.8/8] Sub-scorers (role / hard-skill / seniority / industry / desirability / evidence)...")
     t0 = time.time()
-    if max_jobs and len(jobs) > max_jobs:
-        kept, dropped = split_by_prerank(jobs, max_jobs)
-        jobs = kept
-        print(f"\n[5/7] Scoring top {len(jobs)} by pre-rank with LLM ({len(dropped)} below threshold)...")
-        if len(dropped):
-            print(f"  Below pre-rank threshold (not LLM-scored):")
-            for _, row in dropped.head(15).iterrows():
-                print(f"    {int(row.get('prerank_score', 0)):+4d}  {str(row.get('title', '?'))[:50]} @ {str(row.get('company', '?'))[:25]}")
-            if len(dropped) > 15:
-                print(f"    ... and {len(dropped) - 15} more")
-    else:
-        print("\n[5/7] Scoring with LLM (Phygital-weighted framework)...")
-    jobs = score_all_jobs(jobs, min_score=min_score)
+    jobs, sub_counters = run_sub_scorers_and_print(jobs)
     print(f"  -> {time.time() - t0:.0f}s")
+
+    # Split for matcher gating
+    skip_mask = jobs["recommendation"] == "Skip"
+    skipped_by_score = jobs[skip_mask].copy()
+    jobs_for_llm = jobs[~skip_mask].reset_index(drop=True)
+
+    # Honour --max-jobs on the Apply/Review pool only
+    dropped_by_cap = pd.DataFrame()
+    if max_jobs and len(jobs_for_llm) > max_jobs:
+        jobs_for_llm, dropped_by_cap = split_by_prerank(jobs_for_llm, max_jobs)
+
+    # Step 5: Heavy LLM (narrative / KeySkills / RoleSummary / dimensions).
+    # Only Apply + Review survivors reach this stage.
+    t0 = time.time()
+    print(
+        f"\n[5/8] Heavy LLM scoring: {len(jobs_for_llm)} jobs "
+        f"(skipped {int(skip_mask.sum())} auto-Skip, "
+        f"{len(dropped_by_cap)} below --max-jobs={max_jobs})"
+    )
+    print(
+        f"  LLM evaluated (planned): {len(jobs_for_llm)} | "
+        f"skipped by hard gates / auto-Skip: {int(skip_mask.sum()) + len(dropped_by_cap)} | "
+        f"skill-extract LLM calls: {sub_counters['skill_llm_calls']} | "
+        f"skill-extract cache hits: {sub_counters['skill_cache_hits']} | "
+        f"skill-extract failures: {sub_counters['skill_extraction_failures']}"
+    )
+    if len(jobs_for_llm) > 0:
+        jobs_for_llm = score_all_jobs(jobs_for_llm, min_score=min_score)
+    print(f"  -> {time.time() - t0:.0f}s")
+
+    # Bring the bypassed rows back so Sheets + digest still see them.
+    # Legacy match_score / decision_hint are mirrored from final_score /
+    # recommendation (Review → Maybe) until the R4-02 digest rewires these.
+    for df_part, reason in (
+        (skipped_by_score, "recommendation=Skip"),
+        (dropped_by_cap, f"below_max_jobs_cap({max_jobs})"),
+    ):
+        if not df_part.empty:
+            df_part["llm_stage_skipped_reason"] = reason
+            df_part["match_score"] = df_part["final_score"]
+            df_part["decision_hint"] = df_part["recommendation"].map(
+                {"Apply": "Apply", "Review": "Maybe", "Skip": "Skip"}
+            )
+
+    jobs = pd.concat(
+        [df for df in (jobs_for_llm, skipped_by_score, dropped_by_cap) if not df.empty],
+        ignore_index=True,
+    )
+    if "match_score" in jobs.columns:
+        jobs = jobs.sort_values("match_score", ascending=False).reset_index(drop=True)
+
     if jobs.empty:
         print("No jobs scored. Exiting.")
         return
@@ -451,7 +499,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
         print(f"  [{marker}] {row.get('match_score', 0):3d}% {row.get('title', '?')} @ {row.get('company', '?')}")
 
     # Step 6: Store in Google Sheets
-    print("\n[6/7] Saving to Google Sheets...")
+    print("\n[6/8] Saving to Google Sheets...")
     t0 = time.time()
     if spreadsheet_id:
         append_jobs(jobs, spreadsheet_id)
@@ -463,7 +511,7 @@ def run_pipeline(scrape_only=False, min_score=0, quick=False, max_jobs=0, no_sco
     print(f"  -> {time.time() - t0:.0f}s")
 
     # Step 7: Send email digest
-    print("\n[7/7] Building digest...")
+    print("\n[7/8] Building digest...")
     t0 = time.time()
 
     # Build keyword stats for digest
